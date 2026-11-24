@@ -1,0 +1,13 @@
+# Runtime working directory and generated artifacts (never commit)
+work/
+output/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.db
+*.sqlite
+*.sqlite3
+*.log
+.DS_Store
