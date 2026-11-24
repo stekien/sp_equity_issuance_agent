@@ -10,11 +10,11 @@ You are executing an autonomous, time-bounded financial data engineering mission
 4. **Always-Shippable, Atomically Validated `output/`**: Produce a complete, validated `output/` early (Milestone 1) and atomically refresh it via `work/staging_output/` after every phase and batch. Never leave `output/` partial or unvalidated.
 5. **Time Budget, Telemetry & Autonomous Continuation**:
    - Read optional `RUN_BUDGET_MINUTES` env var (default `240`). Compute proportional gates at Phase 0 (see `docs/ARCHITECTURE.md`: for `240` min → Phase 6 hard gate at `210` min, Freeze gate at `225` min; for `30` min → Phase 6 at `23` min, Freeze at `28` min).
-   - Record wall-clock start/end/duration and item counts for every phase and batch in SQLite table `phase_timings` and summarize in `work/STATE.md` and `output/COVERAGE.md`.
-   - **Never pause to ask for user confirmation between phases.** Proceed autonomously from Phase 0 → Phase 6.
+   - Record wall-clock start/end/duration and item counts for **every phase (0–6)** and batch in the **main** SQLite database's `phase_timings` table (never solely in a scratch DB) and summarize in `work/STATE.md` and `output/COVERAGE.md`.
+   - **Never pause to ask for user confirmation between phases, and NEVER stop early before `freeze_cutoff_min` while gaps remain.** Do NOT jump to Phase 6 early just because Milestone 1 passed — only enter Phase 6 once Phases 1–5 (historical membership back to 2021, Tier 2 monthly buyback & offering parsers, share-count reconciliation, and `market-verifier`) are genuinely complete OR `elapsed >= phase6_cutoff_min`. Re-task finished background subagents immediately if work remains.
    - **Fail-Fast Circuit Breaker**: Never spend > 3 retries or > 3 minutes fighting a single blocked external URL or malformed filing; log it, use the documented fallback, and keep moving.
 6. **SEC EDGAR Fair-Access & Privacy**: Send `$SEC_USER_AGENT` **only** to `sec.gov` hosts (use a clean neutral bot User-Agent without personal email for non-SEC hosts). Enforce a **shared cross-process rate limit ≤ 8 req/sec** across main scripts and subagents via a single cached client in `work/src/`. Never fetch the same URL twice.
-7. **Context Hygiene**: Run Python unbuffered (`python -u`). Write verbose logs, parser diagnostics, and large tables to `work/logs/` or SQLite; keep terminal stdout concise (≤ ~25–30 lines per command).
+7. **Context Hygiene & Command Portability**: Run Python unbuffered using direct single commands (`work/.venv/bin/python -u work/src/...` — avoid compound `cd ... && ...` chains and `sleep` so background subagents match `.claude/settings.json` permissions cleanly). Write verbose logs, parser diagnostics, and large tables to `work/logs/` or SQLite; keep terminal stdout concise (≤ ~25–30 lines per command).
 
 ## Required Deliverables (in `output/`)
 

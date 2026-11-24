@@ -28,6 +28,12 @@ Respect this boundary strictly:
 
 Read the Acadian article (`the-smart-money-is-selling-equity`) in full via `benchmark-researcher` and compute **every single methodology version** described in the article for the S&P 500 so all definitions can be compared like-for-like:
 
+```text
+NI_cash(q) = sum_{r active} net_amount_usd(r) * overlap_days(r, q) / total_days(r)
+NI_sc(q)   = sum_{c, t in q} (Shares_c(t) - Shares_c(t-1)) * Price_c(t)   # splits excluded; sum ALL common classes!
+Fed Z.1 $B = FU103164105.Q / 1,000 == FA103164105.Q / 4,000
+```
+
 1. **Version 1 — Bottom-Up Cash-Flow Event Net Issuance (`NI_cash`, Headline from `events.csv`)**:
    - Sum of primary offerings, M&A share fair value, conversions, warrants, and employee-plan cash proceeds minus buybacks (open-market, ASR, tender/exchange), allocated pro-rata by days to calendar quarters (plus monthly trailing-12-month detail).
    - Also compute event-level sensitivity variants: (a) with RSU `tax_withholding_net_settlement`, (b) with `issuance_employee_equity` valued at vest-date fair value (`NI_sbc_fv`), (c) with `retirement_cash_merger`, and (d) excluding non-cash split-off exchanges.
@@ -62,7 +68,7 @@ Read the Acadian article (`the-smart-money-is-selling-equity`) in full via `benc
 
 ### Multi-Stage Audits & External Web Verification
 - **Early Audit (end of Phase 2 / Milestone 1)**: Fast `qa-auditor` pass to catch semantic XBRL bugs (preferred/NCI/context/twins) before bulk Tier 2 runs.
-- **Web Verification Pass (Phase 5)**: Dispatch `market-verifier` (Yahoo Finance, Google Finance, S&P DJI buybacks, StockAnalysis, Nasdaq) to verify the top 25 S&P 500 movers, major splits, S&P 500 buyback totals, and mega-IPO details (SpaceX, Anthropic, etc.).
+- **Web Verification Pass (Phase 5 — Mandatory, Never Skip!)**: Dispatch `market-verifier` (Yahoo Finance, Google Finance, S&P DJI buybacks, StockAnalysis, Nasdaq) to verify the top 25 S&P 500 movers, major splits, S&P 500 buyback totals, and mega-IPO details (SpaceX, Anthropic, etc.), and confirm every major IPO chart annotation directly against its **primary `424B4` prospectus cover page** (exact pricing date, shares offered, offering price, gross proceeds)!
 - **Final Adversarial Audit (Phase 6)**: Full `qa-auditor` pass including ≥ 15 raw-filing spot-checks (top buybacks, top offerings, ASRs, tender/split-off offers, ATMs, M&A, multi-class, S&P additions/removals, and multi-filing revision chains). Must achieve `PASS` before final publish.
 
 ## 4. Editorial Chart Specifications & Mega-IPO Callouts

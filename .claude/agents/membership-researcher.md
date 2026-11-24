@@ -15,14 +15,13 @@ You are a background membership researcher building survivorship-free historical
 ## Workflow (Year-by-Year Backward: 2025 → 2024 → 2023 → 2022 → 2021)
 
 Read `docs/MEMBERSHIP.md` carefully before starting. For each historical year:
-1. Parse quarterly `N-PORT-P` equity holdings (`assetCat = EC`) from the primary and cross-check S&P 500 ETFs. Capture issuer name, CUSIP, ISIN, LEI, share balance, USD market value, weight, and implied price (`valUSD / balance`).
+1. Parse quarterly `N-PORT-P` equity holdings (`assetCat = EC`) from the primary and cross-check S&P 500 ETFs (**note: `N-PORT-P` has issuer name, CUSIP, ISIN, LEI — NO ticker field!**). Capture share balance, USD market value, weight, implied price (`valUSD / balance`), and **authoritative `verified_quarter_end_counts`** (required by the main integration gate!).
 2. Identify every addition, removal, merger, holding-company succession, and spin-off in that year.
 3. Resolve every constituent (especially departed/acquired issuers absent from `company_tickers.json`) to its verified 10-digit SEC CIK:
    - NEVER join on `LEI == "N/A"` or `CUSIP == "000000000"`.
    - Normalize reversed EDGAR names and state suffixes; confirm every CIK against `submissions/CIK{cik10}.json` (legal/former names, periodic-report history, SIC code) to avoid shell/subsidiary collisions.
    - Link holding-company successions (`8-K12B` / `Form 25`) as continuous index seats; verify `Form 25` applies to common equity (not debt); filter out post-deletion residual ETF holdings and spin-off transients moving to S&P 400/600; flag any FDIC-regulated bank filers transparently.
-4. Pin exact effective dates from S&P DJI press releases (`"prior to the open on D"` → entrant start `D`, departed end `D − 1 day`) and SEC filings.
+4. Pin exact effective dates AND announcement publication dates (`membership_announced_at`) from S&P DJI press releases — search broadly (`"S&P 500"`, `"Set to Join"`, `"to Replace"`, `"Index Changes"`, `"Changes to the S&P"`, **never** just `"join"`!) — and SEC filings (`"prior to the open on D"` → entrant start `D`, departed end `D − 1 day`). Verify `membership_announced_at <= effective_date` and tag `membership_source` (`sp_dji_release` | `sec_filing` | `nport_fallback`).
 5. Cross-check that year's constituents and change dates against Wikipedia's historical S&P 500 table, re-investigating any discrepancy strictly in primary sources.
-6. Atomically write `work/staging_membership/year_{YYYY}.json` containing:
-   - `year`, `generated_at_utc`, `verified_quarter_end_counts`, `constituents` (with `cik`, `ticker`, `company_name`, `share_class`, `sic`, `is_financial`, `member_start_date`, `member_end_date`, `entered_before_year`, `source_type`, `source_url`, `source_accession_number`, `date_precision`), `nport_prices` (quarter-end price & share balance snapshots), `fdic_or_unresolved`, and `wikipedia_crosscheck_summary`.
-7. Keep stdout concise; log details to `work/logs/membership_researcher.log`.
+6. Atomically write `work/staging_membership/year_{YYYY}.json` strictly conforming to the required contract in `docs/MEMBERSHIP.md` §1 (`year`, `verified_quarter_end_counts`, `constituents` with `membership_announced_at` & `membership_source`, `nport_prices`, `fdic_or_unresolved`, and `wikipedia_crosscheck`).
+7. Invoke Python via direct single commands (`work/.venv/bin/python -u ...`, no `cd &&` chains); keep stdout concise and log details to `work/logs/membership_researcher.log`.

@@ -4,7 +4,7 @@ This repository contains instructions and Claude Code configuration for autonomo
 
 ## Run Configuration
 
-- **Agent and model**: Claude Code with **Claude Opus 5.5**
+- **Agent and model**: Claude Code with **Claude Opus 5.5 (high effort)**
 - **Pre-installed software**:
   - `python3` (**Python 3.14**) with `python3-venv` and `pip` (optionally `uv` for faster installs)
   - `git`

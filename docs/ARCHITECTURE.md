@@ -36,19 +36,20 @@ Keep all scripts, caches, databases, logs, and staging directories under `work/`
    - **Host-scoped User-Agent**: Send `$SEC_USER_AGENT` **only** to `*.sec.gov` hosts; send a clean neutral descriptive User-Agent (no personal email, never spoofing a browser) to non-SEC hosts.
    - **Cross-process global rate limiter**: Enforce **≤ 8 requests/second** across ALL processes and subagents targeting `sec.gov` using an `fcntl`-locked timestamp token bucket file under `work/cache/.edgar_ratelimit.lock`.
    - **Explicit timeouts & backoff**: 10s connect / 25s read timeout on every request; exponential backoff with jitter on HTTP `429`/`5xx` (max 3–5 retries); fail-fast circuit breaker on persistent `403`/`404`.
-   - Always invoke Python scripts with `python -u` (line-buffered stdout) and log progress every ~25 CIKs. Avoid shell-specific word splitting (`for x in $var`) in batch commands.
+   - Always invoke Python scripts with direct single-command paths (`work/.venv/bin/python -u work/src/...`, never compound `cd ... && ...` or `sleep`) so background subagents never hit permission denials; log progress every ~25 CIKs and record a `phase_timings` row in the **main** SQLite DB for every phase (0–6). Avoid shell-specific word splitting (`for x in $var`) in batch commands.
 
 ## 3. Staged Background Handoff & Fast Integration Checks
 
-To avoid SQLite write locks (`database is locked`) and half-built membership states:
+To avoid SQLite write locks (`database is locked`) and brief-vs-gate mismatches:
 - Background subagents (`membership-researcher`, `benchmark-researcher`, `market-verifier`) **never write directly to `pit_equity.sqlite`**. They write atomic JSON files (write to `.tmp`, then `os.replace`) into `work/staging_membership/` or `work/staging_benchmarks/`.
-- At every main-agent batch boundary (~every 15–20 minutes), check `work/staging_membership/` for new `year_{YYYY}.json` files and run a **fast automated integration check**:
+- **Exact Brief-to-Gate Alignment**: Every subagent brief MUST require the exact JSON schema validated by the integration gate (see `docs/MEMBERSHIP.md` §1 for the exact `year_{YYYY}.json` contract — never mark a required gate field optional in the subagent brief!). Even better: in Phase 1, downloading all ~23 quarterly `N-PORT-P` XML files (2021–2026) takes < 15 seconds, so the main agent can compute authoritative quarter-end `N-PORT-P` snapshot counts directly while `membership-researcher` resolves exact S&P DJI effective dates, `membership_announced_at`, and departed CIKs!
+- At every main-agent batch boundary (~every 15–20 minutes, or immediately when a background agent completes), check `work/staging_membership/` for new `year_{YYYY}.json` files and run a **fast automated integration check**:
   1. Every quarter-end in year `YYYY` has ~500 active companies (495–508 listings allowing dual share classes).
   2. Zero overlapping or inverted `[member_start_date, member_end_date]` intervals per CIK.
-  3. 100% of CIKs are valid 10-digit SEC CIKs verified against `submissions`, with primary-source URL/accession citations.
+  3. 100% of CIKs are valid 10-digit SEC CIKs verified against `submissions`, with primary-source URL/accession citations and `membership_announced_at <= effective_date` where announced.
   4. Wikipedia historical cross-check delta is recorded.
-- Only when the integration check passes does the main agent atomically merge year `YYYY` into `constituents`, extend `membership_verified_back_to`, and enqueue newly discovered departed CIKs for Tier 1/Tier 2 extraction.
-- **Fallback**: If the background `membership-researcher` stops early or misses any year, the main agent completes remaining historical years at the start of Phase 4.
+- Only when the integration check passes does the main agent atomically merge year `YYYY` into `constituents`, extend `membership_verified_back_to`, and enqueue newly discovered departed CIKs for Tier 1/Tier 2 extraction. Immediately re-task finished background agents if any year failed validation or remains incomplete!
+- **Fallback**: If the background `membership-researcher` stops early or misses any year, the main agent completes remaining historical years immediately at the start of Phase 4 (never skip Phase 4!).
 
 ## 4. Explicit, Idempotent Post-Processing DAG
 
@@ -64,7 +65,7 @@ Do **not** stack ad-hoc SQL updates that mutate flags in unpredictable order. Im
 
 ## 5. Atomic Publishing Protocol
 
-1. Generate all deliverables into `work/staging_output/`.
+1. Generate all deliverables directly into `work/staging_output/` (`events.csv`, `README.md`, `net_equity_issuance.{svg,png}`, `acadian_comparison.{svg,png}`, `COVERAGE.md` — keep all charts at the root of `output/`, not buried in subdirectories).
 2. Run the full blocking validation suite (schema, enums, timestamps, FY reconciliation, zero overlap, PIT `as_of(latest) == headline`, chart non-empty & legible).
 3. Only after every blocking check passes, atomically move files from `work/staging_output/` into `output/` via `os.replace`, and record the publish + timing row in `phase_timings` and `work/STATE.md`.
 

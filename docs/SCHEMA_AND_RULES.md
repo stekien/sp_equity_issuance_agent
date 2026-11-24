@@ -50,8 +50,15 @@ Apply these exact `category` values consistently across every row:
    - Every newly filed update, settlement, greenshoe, or restatement creates a **new row** with its own `record_id`, the new filing's `published_at` (`acceptanceDateTime` UTC), `is_revision = true`, and `supersedes_record_id = <prior record_id>`.
    - Append `[superseded_at:<new_published_at>]` to the prior row's `notes` and set `include_in_net_aggregate = false` on the superseded row while keeping the row intact in `events.csv`.
 3. **Exact Point-in-Time `as_of(D)` Operator**:
-   - Implement a reusable library (`work/src/<pkg>/pit.py`) computing `as_of(D)` for any timestamp `D`: filter `published_at <= D`, pick the row with maximum `published_at` per `event_key`, and include rows active as of `D` (restoring rows whose `superseded_at > D`).
-   - Enforce `as_of(latest_published_at) == headline(include_in_net_aggregate == true)` as a **blocking validator check**, AND verify `as_of(D)` at least at 3 intermediate historical dates (e.g., mid-quarter right after a major `424B5`/`8-K` before the `10-Q` was filed) to prove point-in-time reconstruction works!
+   - Implement a reusable library (`work/src/<pkg>/pit.py`) computing `as_of(D)` for any timestamp `D`:
+
+```text
+K(D) = { r : published_at(r) <= D, latest published_at per event_key }
+A(D) = { r in K(D) : include_in_net_aggregate == 1  OR  (superseded_at(r) > D and in_scope(r)) }
+Check: A(max published_at) == { r : include_in_net_aggregate == 1 }
+```
+
+   - Enforce `A(max published_at) == headline` as a **blocking validator check**, AND verify `as_of(D)` at ≥ 3 intermediate historical dates **inside the trailing-12-month headline window** (e.g., right after a major `424B5`/`8-K` offering or ASR before the `10-Q` was filed) to prove live point-in-time reconstruction works where it matters most!
 4. **Granularity Superseding (Zero Double-Counting)**:
    - When monthly buybacks or transaction-level offerings/ASRs/M&A supersede an overlapping Tier 1 quarterly XBRL fallback row, set `include_in_net_aggregate = false` on the fallback row (tagging `[replaced_by_monthly:...]` or `[replaced_by_tier3:...]`) so summing `include_in_net_aggregate == true` never double-counts.
 

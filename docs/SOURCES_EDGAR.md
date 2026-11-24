@@ -30,7 +30,7 @@ Apply **both** structural defenses from Phase 2 onward:
 Never sum overlapping Cash Flow and Stockholders' Equity concepts for the same flow in the same period! Apply strict precedence + overlap-aware selection:
 - **Buybacks (USD)**: `PaymentsForRepurchaseOfCommonStock` ≻ `StockRepurchasedAndRetiredDuringPeriodValue` ≻ `StockRepurchasedDuringPeriodValue` ≻ `TreasuryStockValueAcquiredCostMethod` (reject cumulative multi-year program totals tagged as period facts—verify against annual cash flow!).
 - **Buybacks (Shares)**: `StockRepurchasedAndRetiredDuringPeriodShares` ≻ `StockRepurchasedDuringPeriodShares` ≻ `TreasuryStockSharesAcquired`.
-- **New Issues / Offerings**: `ProceedsFromIssuanceOfCommonStock` vs. `StockIssuedDuringPeriodValueNewIssues` (never count both for the same period; guard against `NewIssues` duplicating `ProceedsFromStockOptionsExercised` when `NewIssues` is close to or ≤ 3× employee cash proceeds without a separate offering!).
+- **New Issues / Offerings**: `ProceedsFromIssuanceOfCommonStock` vs. `StockIssuedDuringPeriodValueNewIssues` (never count both for the same period; check whether `NewIssues` duplicates `ProceedsFromStockOptionsExercised` by comparing exact/near-matching dollars or shares and verifying against the filing rather than using an arbitrary multiplier!).
 - **Acquisitions**: `StockIssuedDuringPeriodValueAcquisitions` / `StockIssuedDuringPeriodSharesAcquisitions`.
 - **Employee Equity Plans**:
   - Cash proceeds basis: `ProceedsFromStockOptionsExercised`, `ProceedsFromIssuanceOfSharesUnderIncentiveAndShareBasedCompensationPlansIncludingStockOptions`, `ProceedsFromStockPlans`.
@@ -38,16 +38,23 @@ Never sum overlapping Cash Flow and Stockholders' Equity concepts for the same f
   - Tax withholding (always tracked separately under `tax_withholding_net_settlement`): `PaymentsRelatedToTaxWithholdingForShareBasedCompensation`.
 - **Warrants & Conversions**: `ProceedsFromWarrantExercises`, `StockIssuedDuringPeriodSharesWarrantsExercised`, `StockIssuedDuringPeriodValueWarrantsExercised`, `StockIssuedDuringPeriodSharesConversionOfConvertibleSecurities`, `StockIssuedDuringPeriodValueConversionOfConvertibleSecurities`.
 - **Debt Issuance (for Acadian Figure 3 Baker-Wurgler Equity Share `E/(E+D)`)**: `ProceedsFromIssuanceOfLongTermDebt`, `ProceedsFromIssuanceOfDebt`, `ProceedsFromIssuanceOfSeniorLongTermDebt`.
-- **Shares Outstanding (for Share-Count Reconciliation & Acadian Eq. 1)**: Collect `CommonStockSharesOutstanding` (us-gaap), `EntityCommonStockSharesOutstanding` (dei cover page), AND dimensional per-class share counts from iXBRL/cover pages so issuers with rounded balance-sheet totals (e.g., 0.1B rounding) or per-class-only reporting are NEVER omitted!
+- **Shares Outstanding (for Share-Count Reconciliation & Acadian Eq. 1)**: Collect `CommonStockSharesOutstanding` (us-gaap), `EntityCommonStockSharesOutstanding` (dei cover page), AND **sum all common share classes** from `10-Q`/`10-K` cover pages or iXBRL `ClassOfStockDomain` for dual-class/multi-class issuers (and cover-page exact counts when balance-sheet counts are rounded to 0.1B) so NO major constituent (especially any Magnificent Seven member!) is dropped from share-count reconciliation or Acadian Eq. (1)!
 
 ### Context Validation, YTD De-cumulation & Blocking FY Reconciliation
 1. **Strict Context Validation**:
    - Accept a direct ~3-month fact `[a, b]` ONLY when `b` and `a − 1` align (±3 days) with actual report dates of the issuer's `10-Q`/`10-K`/`10-QT` filings (or `a` equals fiscal-year start; explicitly support `10-QT` transition quarters and 12–17 week retail quarters!).
    - Reject 3-month contexts reported inside a `10-K` unless they correspond to the fiscal-year-end quarter (prevents mis-tagged full-year figures on Q3/Q4 contexts!).
    - Reject a 3-month fact whose value equals the same filing's YTD value when an earlier quarter of that fiscal year was non-zero.
-2. **Vintage-Consistent YTD De-cumulation**:
-   - Derive `Q_k = YTD(s, e_k) − YTD(s, e_{k-1})` within the same fiscal-year start `s` using values from the vintage known when `YTD(s, e_k)` was published (falling back cleanly to later vintage with that filing's `published_at` if prior YTD was restated/unavailable).
-   - Handle opposite-sign YTD pairs in absolute value; discard negative "new issue" values (accounting reversals with $0 cash proceeds, not equity issuance).
+2. **Vintage-Consistent YTD De-cumulation & Sign Normalization (Take Absolute Value BEFORE Subtracting!)**:
+
+```text
+Q_k = |YTD_v(s, e_k)| - |YTD_v(s, e_{k-1})|   # same fiscal_year_start s, same filing vintage v!
+published_at(Q_k) = max(published_at(YTD_k), published_at(YTD_{k-1}))
+```
+
+   - Always take absolute values **before** de-cumulating buyback YTD pairs (prevents sign-inconsistent pairs from summing instead of subtracting!).
+   - Always pair YTD values from the **same filing vintage** (never subtract an earlier-vintage 9M YTD from a later spin-off/re-presented 10-K FY, which creates phantom revision spikes!). Only emit a revision when an amended filing (`10-Q/A`, `10-K/A`) or genuine comparative restatement changes the same period within consistent accounting scope.
+   - Discard negative "new issue" values (accounting reversals with $0 cash proceeds, not equity issuance).
    - Every derived quarter (`Q2`, `Q3`, `Q4`) sets `extraction_method = calculated`, carries the `acceptanceDateTime` of the later filing needed to compute it, and records exact accession numbers and subtraction formula in `calculation_formula`.
 3. **Blocking Fiscal-Year Identity (`Σ quarters == FY`)**:
    - For every issuer, fiscal year, and concept family, verify that the sum of included quarterly/monthly rows does not exceed the 10-K FY total (within tolerance) — make FY over-counting a **blocking validator check** from Milestone 1!
@@ -67,7 +74,13 @@ Do NOT allow large flows to sit lazily in `buyback_unspecified` or `issuance_oth
 1. **Open-Market Buybacks (`buyback_open_market`) — Monthly Tables (`10-Q` Part II Item 2 & `10-K` Part II Item 5)**:
    - Match headers whitespace-insensitively (`"average ... price"`, `"shares ... purchased"`). Handle multi-row headers, sub-rows under period headers, per-class columns (`Σ shares_k * price_k`), and skip summary `"Total"` / `"Nine months ended"` rows.
    - Prefer column (c) `"purchased as part of publicly announced plans"` when populated (excluding tax withholding); fall back to column (a) with explicit note if column (c) is absent. Exclude unpriced ASR delivery rows from monthly cash sums so prepaid ASR cash isn't double-counted.
-   - Infer share unit scale (`1`, `10³`, `10⁶`) by matching `Σ(shares * avg_price)` against the covering Tier 1 XBRL quarterly buyback total (`ratio ∈ [0.6, 1.6]`, tighter `[0.9, 1.1]` if ASR rows present, and every implied price in `[$1, $20,000]` except verified ultra-high-price shares).
+   - Infer share unit scale (`1`, `10³`, `10⁶`) by matching `Σ(shares * avg_price)` against the covering Tier 1 XBRL quarterly buyback total:
+
+```text
+scale = argmin_{s in {1, 1e3, 1e6}} |ln(sum(shares * avg_price) * s / XBRL_quarter_buyback)|
+Accept iff ratio in [0.60, 1.60] (or [0.90, 1.10] when ASR rows are present)
+and every implied monthly price in [$1, $20,000] (except verified ultra-high-price share classes)
+```
 2. **Accelerated Share Repurchases (`buyback_asr`) — `8-K` & `10-Q/10-K` Repurchase Footnotes**:
    - Scan `8-K` filings (`Item 8.01` / `1.01`) and `10-Q`/`10-K` repurchase footnotes for `"accelerated share repurchase"` or `"ASR"` (especially on every quarter where monthly tables didn't cover XBRL buybacks!).
    - Record upfront execution cash payment & initial share delivery at announcement/execution `published_at`, and link final settlement share adjustment as a revision row on the same `event_key` (**never double-count upfront cash at settlement!**).

@@ -8,23 +8,34 @@ Every company that was an S&P 500 member at any point during the covered window 
   - Build survivorship-free PIT membership for the **trailing 12 months** (current constituents + all additions, removals, mergers, and spin-offs in the past 12 months) using the 4–5 most recent quarterly ETF `N-PORT-P` filings plus S&P DJI announcements from the last 12 months.
   - Set `membership_verified_back_to` to `T − 12 months` (recording `entered_before_verified_window = true` for continuing constituents). This immediately unblocks Phase 2 (Tier 1 XBRL + Milestone 1 Publish) without stalling on 2021–2024 delisted CIKs.
 - **Background Historical Expansion (`membership-researcher` subagent, launched immediately at end of Phase 1)**:
-  - Works continuously backward **one year at a time (`2025 → 2024 → 2023 → 2022 → 2021`)**, writing atomic staged JSON files (`work/staging_membership/year_{YYYY}.json`) that the main agent validates and integrates at batch boundaries (see `docs/ARCHITECTURE.md` §3).
-  - If the background worker doesn't finish all years before Phase 4, the main agent completes remaining years at the start of Phase 4.
+  - Works continuously backward **one year at a time (`2025 → 2024 → 2023 → 2022 → 2021`)**, writing atomic staged JSON files (`work/staging_membership/year_{YYYY}.json`) matching this exact schema contract so the integration gate never rejects on missing fields:
+
+```json
+{
+  "year": 2025,
+  "verified_quarter_end_counts": {"2025-03-31": 503, "2025-06-30": 503, "2025-09-30": 503, "2025-12-31": 503},
+  "constituents": [{"cik": "10-digit", "member_start_date": "YYYY-MM-DD", "member_end_date": "YYYY-MM-DD", "membership_announced_at": "YYYY-MM-DD", "membership_source": "sp_dji_release|sec_filing|nport_fallback", "source_url": "..."}],
+  "wikipedia_crosscheck": {"matched_dates": 0, "total_dates": 0, "discrepancies": []}
+}
+```
+
+  - If the background worker doesn't finish all years before Phase 4 (or any year fails validation), the main agent immediately re-tasks it or completes remaining years at the start of Phase 4.
 
 ## 2. Primary-Source Discovery Method
 
 ### Step A: Dual-Fund Quarterly Snapshots via SEC Form `N-PORT-P`
 1. Locate **two** major S&P 500 index-tracking ETFs dynamically on SEC EDGAR via `https://www.sec.gov/files/company_tickers_mf.json` and EDGAR series listings (e.g., iShares Core S&P 500 ETF as primary and Vanguard 500 Index Fund / VOO as secondary cross-validation; verify the exact series ID belongs to the S&P 500 index fund, not another fund in the same trust).
-2. Download `N-PORT-P` primary XML filings (`primary_doc.xml`) covering the target window (quarterly snapshots).
-3. Parse equity holdings (`assetCat = EC`, excluding cash, futures, repo, and collateral). Extract issuer name, CUSIP, ISIN, LEI, share balance, USD market value, portfolio weight, and **implied quarter-end price (`valUSD / balance`)** — these weights prioritize Phase 3 extraction, and the quarter-end prices + share balances support Acadian Eq. (1) and float-adjusted verification!
+2. Download `N-PORT-P` primary XML filings (`primary_doc.xml`) covering the target window (all ~23 quarterly snapshots 2021–present take < 15 seconds to fetch, so downloading the full quarterly set early lets the main agent compute authoritative quarter-end counts deterministically!).
+3. Parse equity holdings (`assetCat = EC`, excluding cash, futures, repo, and collateral). **Note: `N-PORT-P` XML carries issuer name, CUSIP, ISIN, and LEI — it does NOT carry tickers!** Extract share balance, USD market value, portfolio weight, and **implied quarter-end price (`valUSD / balance`)** — these weights prioritize Phase 3 extraction, and the quarter-end prices + share balances support Acadian Eq. (1) and float-adjusted verification!
 4. Cross-checking two S&P 500 funds immediately flags residual post-deletion holdings or tiny spin-off transients held briefly by one fund after an index change.
 
-### Step B: Exact Effective Dates via S&P DJI Announcements & SEC Filings
+### Step B: Exact Effective Dates & `membership_announced_at` via S&P DJI Announcements & SEC Filings
 Because `N-PORT-P` is quarterly and has up to a ~60-day SEC reporting lag:
-1. **Launch S&P Dow Jones Indices press release ingestion early** (`press.spglobal.com` / official S&P DJI index-change announcements) covering both the post-snapshot gap (latest `N-PORT-P` → today) AND all historical index changes back to 2021.
-2. Parse the exact S&P DJI effective date convention: *"effective prior to the opening of trading on date D"* means entrant `member_start_date = D` and departing company `member_end_date = D − 1 day`.
-3. For any change not covered by an S&P DJI release (such as holding-company reorganizations or mergers), confirm exact dates from SEC EDGAR (`8-K` Item 2.01 / 5.01 / 8.01, `8-K12B` successor filings, `Form 25-NSE` delisting notices, and `Form 10` spin-off distributions via `https://efts.sec.gov/LATEST/search-index`).
-4. Automate post-snapshot S&P DJI press release checking inside `--mode incremental` so ongoing runs detect newly announced index changes automatically without manual override files.
+1. **Launch S&P Dow Jones Indices press release ingestion early** (`press.spglobal.com` / official S&P DJI index-change announcements) covering both the post-snapshot gap (latest `N-PORT-P` → today) AND all historical index changes back to 2021. Search broadly across S&P 500 announcement titles (`"S&P 500"`, `"Set to Join"`, `"to Replace"`, `"Index Changes"`, `"Changes to the S&P"` — **do NOT filter only for the word `"join"`**, which misses replacements and spin-off removals!).
+2. Parse both the **effective date** (`"effective prior to the opening of trading on date D"` → entrant `member_start_date = D`, departing company `member_end_date = D − 1 day`) AND the **announcement publication date (`membership_announced_at`)** right from the press release header, recording `membership_source = sp_dji_release` (or `sec_filing` / `nport_fallback`) in `constituents`.
+3. **Real-Market Point-in-Time Rule**: Always gate economic membership inclusion on `[member_start_date, member_end_date]` (matching live financial market membership to the exact trading day) and enforce the audit check `membership_announced_at <= effective_date` on announced changes — **never** use `N-PORT-P`'s 60-day-later filing date to hide a real S&P 500 member inside `pit.as_of(D)`! Report in `COVERAGE.md` the exact % of boundaries backed by pre-effective S&P DJI/SEC announcements vs. `N-PORT-P` fallback.
+4. For any change not covered by an S&P DJI release (such as holding-company reorganizations or mergers), confirm exact dates and filing timestamps from SEC EDGAR (`8-K` Item 2.01 / 5.01 / 8.01, `8-K12B` successor filings, `Form 25-NSE` delisting notices, and `Form 10` spin-off distributions via `https://efts.sec.gov/LATEST/search-index`).
+5. Automate post-snapshot S&P DJI press release checking inside `--mode incremental` so ongoing runs detect newly announced index changes before they take effect without manual override files.
 
 ### Step C: Hardened CIK Resolution (Critical Edge Cases)
 Never rely naively on `company_tickers.json` (which omits departed/acquired companies) or raw metadata joins:
@@ -48,4 +59,4 @@ Never rely naively on `company_tickers.json` (which omits departed/acquired comp
 
 - **Transactions**: Included iff `member_start_date <= event_date <= member_end_date`.
 - **Periodic Rows (monthly/quarterly)**: Included iff active on `period_end` (preferring monthly/transaction granularity around entry/exit dates to minimize partial-quarter edge effects; document exact partial-period impact in `COVERAGE.md`).
-- **Mandatory Wikipedia Cross-Check (Verification Only)**: After integrating each membership window, compare against Wikipedia's S&P 500 constituent list and historical changes table. If Wikipedia surfaces a missed constituent or date, **never copy from Wikipedia**—go back to `N-PORT-P`, S&P DJI releases, or SEC `8-K`/`Form 25` to confirm and ingest from a primary source. Log exact match rate (e.g., `X/500` current CIKs, `Y/Z` change dates) in `COVERAGE.md`.
+- **Mandatory Wikipedia Cross-Check (Verification Only)**: Always run the Wikipedia check for **both current constituents (Phase 1, verified directly by the main agent)** and historical changes (each integrated year). If Wikipedia surfaces a missed constituent or date, **never copy from Wikipedia**—go back to `N-PORT-P`, S&P DJI releases, or SEC `8-K`/`Form 25` to confirm and ingest from a primary source. Log exact match rate (e.g., `X/500` current CIKs, `Y/Z` change dates) in `COVERAGE.md`.
