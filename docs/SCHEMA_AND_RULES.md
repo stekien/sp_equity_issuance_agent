@@ -2,112 +2,110 @@
 
 ## 1. Scope & Security Definition
 
-- **Universe**: Every company that was a member of the S&P 500 at any point during the covered period, counted **only while it was an active member**.
-- **Security Type**: **Common stock only** for the core S&P 500 net equity issuance series (`security_type = common_stock`). Preferred stock, straight debt, and unconverted convertible bonds are excluded (convertible debt or preferred stock enters ONLY when converted into common stock, under `issuance_conversion`).
-- If you separately record cash M&A retirements of departing S&P 500 members (`retirement_cash_merger`) or RSU net-share tax withholdings (`tax_withholding_net_settlement`) for analytical completeness and benchmark bridging, tag them cleanly with their dedicated categories and document clearly in `output/README.md` and `COVERAGE.md` how they are treated in headline vs. supplemental aggregates.
+- **Universe**: Every company that was an S&P 500 member at any point during the covered period, counted **only while it was an active member**.
+- **Security Type**: **Common stock only** (`security_type = common_stock`) in headline S&P 500 net equity issuance. Preferred stock, straight debt, and unconverted convertible bonds are excluded (convertibles enter ONLY upon conversion into common stock under `issuance_conversion`).
+- Supplemental flows (`tax_withholding_net_settlement`, `retirement_cash_merger`, and SBC vest-date fair value `sub_id = sbc_fair_value`) are recorded in `events.csv` with explicit categories and `include_in_net_aggregate = false` in the cash-flow headline so users and benchmarks can toggle them cleanly without ambiguity.
 
 ## 2. Controlled Category Taxonomy
 
 Apply these exact `category` values consistently across every row:
 
 ### Buybacks (`direction = buyback`, `net_amount_usd < 0`)
-- `buyback_open_market` — Open-market common stock repurchases (including monthly 10-Q/10-K Item 2/5 tables when excluding ASRs/tenders).
-- `buyback_asr` — Accelerated share repurchase agreements (upfront execution and final share true-up).
-- `buyback_tender_offer` — Issuer self-tender offers (`SC TO-I` / `8-K`).
-- `buyback_unspecified` — Aggregate common stock repurchases from XBRL cash-flow / equity statements where method breakdown was not yet parsed or not separately disclosed.
-- `tax_withholding_net_settlement` — Shares withheld by the company upon RSU/PSU vesting to satisfy employee payroll tax obligations (`PaymentsRelatedToTaxWithholdingForShareBasedCompensation`). Keep distinct from discretionary buybacks!
+- `buyback_open_market` — Open-market common stock repurchases (primarily monthly `10-Q`/`10-K` Item 2/5 tables).
+- `buyback_asr` — Accelerated share repurchase agreements (upfront execution and linked final settlement share true-up).
+- `buyback_tender_offer` — Issuer self-tender offers and split-off exchange offers (`SC TO-I` / `SC TO-I/A` / `8-K`, noting cash tender vs. split-off exchange in `notes`).
+- `buyback_unspecified` — Aggregate common repurchases from XBRL cash-flow statements where monthly/method breakdown could not be extracted (minimize via Tier 2/3!).
+- `tax_withholding_net_settlement` — Shares withheld upon RSU/PSU vesting for payroll taxes (supplemental; kept distinct from discretionary buybacks).
 
 ### Issuance (`direction = issuance`, `net_amount_usd > 0`)
-- `issuance_underwritten_offering` — Primary underwritten follow-on offerings, public offerings, or direct placements of common stock (excluding secondary selling-stockholder shares).
-- `issuance_atm_offering` — Primary shares sold under At-the-Market equity distribution programs.
+- `issuance_underwritten_offering` — Primary underwritten follow-on offerings, public offerings, or direct placements of common stock (secondary selling-stockholder shares strictly excluded).
+- `issuance_atm_offering` — Actual primary common shares sold under At-the-Market equity distribution programs (never count mere ATM program shelf capacity!).
 - `issuance_acquisition` — Common shares issued as consideration in mergers and acquisitions.
-- `issuance_employee_equity` — Common shares issued under employee equity plans (stock option exercises, RSU/PSU vesting/settlement, ESPP).
+- `issuance_employee_equity` — Common shares issued under employee equity plans (options, RSUs/PSUs, ESPP, executive equity awards).
 - `issuance_warrant_exercise` — Common shares issued upon warrant exercises.
 - `issuance_conversion` — Common shares issued upon conversion of convertible debt or convertible preferred stock.
-- `issuance_other_common` — Other primary common equity issuances (e.g., DRIP, debt-for-equity exchange, legal settlement shares).
+- `issuance_other_common` — Residual primary common stock issuances only after checking all specific categories above (DRIP, debt-for-equity exchanges, legal settlements).
 
-### Supplemental Corporate Action (Optional, Clearly Separated)
-- `retirement_cash_merger` — Equity retired when an S&P 500 constituent is acquired for cash / taken private. Set `direction = retirement`, `net_amount_usd < 0`, and document separately in `COVERAGE.md` when bridging to Fed Z.1 / Acadian (which include cash M&A retirements).
+### Supplemental Corporate Action
+- `retirement_cash_merger` — Common equity retired when an S&P 500 constituent is acquired for cash or taken private (`direction = retirement`, `net_amount_usd < 0`, `include_in_net_aggregate = false` in cash-flow headline; quantified separately for Fed Z.1 & Acadian bridging).
 
-## 3. Consistent Valuation Rules
+## 3. Consistent Valuation Policy & Multiple Methodology Views
 
-Choose a clear, economically consistent valuation hierarchy and record `valuation_basis` on every row:
-1. **Buybacks**: Actual cash paid (`cash_paid`) or `shares * avg_price_usd` (`shares_times_avg_price`). Exclude excise tax if separately broken out (or note if included as reported).
-2. **Offerings (`underwritten`, `atm`)**: Gross offering proceeds (`gross_proceeds`) if stated, or `shares * offering_price` (`shares_times_offer_price`); if only net proceeds after underwriting discount are reported, record `net_proceeds` and note it.
-3. **Acquisitions & Conversions**: Fair value of common shares issued at closing/conversion (`fair_value_at_issuance`) as stated in the filing (`StockIssuedDuringPeriodValueAcquisitions` / M&A footnote).
-4. **Employee Equity Plans (`issuance_employee_equity`) — CRITICAL CONSISTENCY RULE**:
-   - Cash proceeds from option exercises and ESPP (`cash_proceeds`) capture actual cash inflows, whereas RSUs/PSUs issue real shares with **$0 cash proceeds**.
-   - Be explicit and consistent! **Recommended default** (matching economic market value and Fed/Acadian equity flow concepts while remaining primary-source auditable):
-     - Record **cash proceeds** (`cash_proceeds`) where disclosed for options/ESPP, AND/OR value RSU/SBC share issuances using filing-disclosed fair value (`fair_value_at_issuance` / `StockIssuedDuringPeriodValueShareBasedCompensation` or `shares * filing_weighted_avg_fair_value`).
-     - Whichever convention you apply across the universe, apply it **uniformly** across all companies, never double-count options + RSUs, and document the exact treatment and its dollar impact in `output/README.md` and `COVERAGE.md` (including showing both cash-flow-basis net issuance and SBC-fair-value-adjusted net issuance in `COVERAGE.md`!).
+1. **Headline Event Cash-Flow Basis (`NI_cash`)**:
+   - **Buybacks**: Cash paid (`cash_paid`) or `shares * avg_price_usd` (`shares_times_avg_price`).
+   - **Offerings (`underwritten`, `atm`)**: Gross offering proceeds (`gross_proceeds` or `shares_times_offer_price`; `net_proceeds` noted if gross undisclosed).
+   - **Acquisitions & Conversions**: Closing/conversion-date fair value (`fair_value_at_issuance`) from the primary filing.
+   - **Employee Equity Plans (Headline)**: Actual cash proceeds (`cash_proceeds` from option exercises & ESPP).
+2. **Supplemental Event Fair-Value Basis (`NI_sbc_fv`)**:
+   - Also record filing-disclosed vest-date fair value of employee equity awards (`sub_id = sbc_fair_value`, `valuation_basis = vest_date_fair_value`, `include_in_net_aggregate = false`) and `tax_withholding_net_settlement` / `retirement_cash_merger` so both cash-flow net issuance AND full economic/SBC-adjusted net issuance can be computed directly from `events.csv`!
+3. **Market-Value Share-Count & Float-Adjusted Measures (for Acadian Verification)**:
+   - Computed directly from primary SEC share counts + `N-PORT-P` prices/holdings per `docs/VERIFICATION.md` §2.
 
-## 4. Point-in-Time Revisions & Anti-Double-Counting Rules
+## 4. True Point-in-Time (Bi-Temporal) Revision & Lifecycle Chains
 
-1. **Canonical `event_key`**: Construct a deterministic key identifying the underlying economic event:
+1. **Canonical `event_key`**:
    `{cik}|{category}|{share_class}|{granularity}|{period_start}|{period_end}|{sub_id}`
-   (where `sub_id` distinguishes multiple discrete offerings/ASRs on the same date, or `base` for periodic aggregates).
-2. **Never Overwrite Revisions**: If a later filing (e.g., `10-Q/A`, `10-K`, or comparative prior-period column) reports a different number for the same `event_key`, insert a **new row** with:
-   - New unique `record_id`
-   - The new filing's `published_at` and `source_accession_number`
-   - `is_revision = true` and `supersedes_record_id = <prior record_id>`
-   - **Keep the original row intact.**
-3. **Point-in-Time Query Semantics**: For any historical date `D`, a client reconstructs what was known on `D` by filtering `published_at <= D` and selecting the row with the latest `published_at` for each `event_key` (and `include_in_net_aggregate = true` at that granularity).
-4. **Granularity Superseding (Monthly vs. Quarterly Fallback)**:
-   - When Tier 2 extracts monthly buyback rows (or specific transaction rows) covering a quarter, set `include_in_net_aggregate = true` on the granular rows and `include_in_net_aggregate = false` on the overlapping Tier 1 `quarterly` XBRL fallback row (with `notes` referencing the granular replacement).
-   - Never allow both a quarterly XBRL total and its constituent monthly rows to have `include_in_net_aggregate = true` simultaneously!
+   *(For multi-filing corporate transactions—e.g., an offering priced in a `424B5`, expanded by greenshoe in an `8-K`, and confirmed in a `10-Q`; an ASR announced in an `8-K` and settled 3 months later; or a tender offer announced in `SC TO-I` and finalized in `SC TO-I/A`—link all lifecycle observations under a **shared `event_key`** so an `as_of_date` query never drops the event between announcement and quarterly confirmation!)*
+2. **Never Overwrite Prior Observations**:
+   - Every newly filed update, settlement, greenshoe, or restatement creates a **new row** with its own `record_id`, the new filing's `published_at` (`acceptanceDateTime` UTC), `is_revision = true`, and `supersedes_record_id = <prior record_id>`.
+   - Append `[superseded_at:<new_published_at>]` to the prior row's `notes` and set `include_in_net_aggregate = false` on the superseded row while keeping the row intact in `events.csv`.
+3. **Exact Point-in-Time `as_of(D)` Operator**:
+   - Implement a reusable library (`work/src/<pkg>/pit.py`) computing `as_of(D)` for any timestamp `D`: filter `published_at <= D`, pick the row with maximum `published_at` per `event_key`, and include rows active as of `D` (restoring rows whose `superseded_at > D`).
+   - Enforce `as_of(latest_published_at) == headline(include_in_net_aggregate == true)` as a **blocking validator check**, AND verify `as_of(D)` at least at 3 intermediate historical dates (e.g., mid-quarter right after a major `424B5`/`8-K` before the `10-Q` was filed) to prove point-in-time reconstruction works!
+4. **Granularity Superseding (Zero Double-Counting)**:
+   - When monthly buybacks or transaction-level offerings/ASRs/M&A supersede an overlapping Tier 1 quarterly XBRL fallback row, set `include_in_net_aggregate = false` on the fallback row (tagging `[replaced_by_monthly:...]` or `[replaced_by_tier3:...]`) so summing `include_in_net_aggregate == true` never double-counts.
 
-## 5. Stock Split Policy
+## 5. Evidence-Based Stock Split Policy
 
-- **Preserve raw as-reported share counts** (`split_adjusted = false`) from each filing as it was published on `published_at`, so point-in-time queries reflect exact historical reported figures.
-- If a later comparative filing restates historical shares on a post-split basis, mark that revision row `split_adjusted = true` and explain the split ratio and effective date in `split_adjustment_note` (e.g., `10-for-1 split effective 2024-06-10; restated in FY2024 10-K`).
-- For untouched raw rows, explicitly populate `split_adjustment_note` as `unadjusted as reported on filing date` (never leave split handling undocumented!).
+- Preserve **raw as-reported share counts** (`split_adjusted = false`, `split_adjustment_note = unadjusted as reported on filing date`) on initial filings.
+- Mark `split_adjusted = true` **only with concrete primary-filing evidence** (an observed split event or explicit comparative restatement where share counts jump by a clean split ratio while dollar values stay unchanged—never guess splits solely from stock price drift!). Record exact split ratio, effective date, and restating filing in `split_adjustment_note`.
 
 ## 6. Exact CSV Column Specification (`output/events.csv`)
 
-UTF-8 encoded, comma-delimited, standard RFC 4180 quoting, header row required, sorted deterministically by `event_date`, `cik`, `category`, `published_at`:
+UTF-8, RFC 4180 CSV, sorted deterministically by `event_date`, `cik`, `category`, `published_at`:
 
 | Column | Type / Format | Required | Description |
 |---|---|---|---|
-| `record_id` | string | Yes | Unique deterministic identifier for this observation row. |
-| `event_key` | string | Yes | Canonical identifier grouping all revisions of the same underlying event. |
+| `record_id` | string | Yes | Unique deterministic ID for this observation row. |
+| `event_key` | string | Yes | Canonical key grouping all lifecycle updates/revisions of the same economic event. |
 | `cik` | string (10-digit) | Yes | Zero-padded SEC CIK of the issuer. |
-| `ticker` | string | Yes | Primary ticker symbol as of `event_date` (blank only if unlisted/post-delisting edge case). |
+| `ticker` | string | Yes | Ticker as of `event_date` (use `dei:TradingSymbol` for departed issuers where available). |
 | `company_name` | string | Yes | Issuer legal/filing name. |
-| `share_class` | string | Yes | Share class (e.g., `Common`, `Class A`, `Class B`, `All Common Classes`). |
-| `security_type` | string | Yes | `common_stock` (default). |
-| `is_financial` | boolean (`true`/`false`) | Yes | Whether issuer is in the financial sector (for Fed Z.1 nonfinancial comparison). |
-| `sp500_member_on_event_date` | boolean (`true`/`false`) | Yes | True if issuer was an active S&P 500 member during the event/period. |
+| `share_class` | string | Yes | Share class (`Common`, `Class A`, `Class B`, `All Common Classes`). |
+| `security_type` | string | Yes | `common_stock`. |
+| `is_financial` | boolean | Yes | Financial-sector flag (SIC 6000–6799) for Fed Z.1 nonfinancial comparison. |
+| `sp500_member_on_event_date` | boolean | Yes | True iff issuer was an active S&P 500 member on `event_date`/`period_end`. |
 | `category` | enum string | Yes | Controlled category from Section 2. |
 | `direction` | enum string | Yes | `issuance`, `buyback`, or `retirement`. |
 | `granularity` | enum string | Yes | `transaction`, `monthly`, `quarterly`, or `annual`. |
-| `event_date` | `YYYY-MM-DD` | Yes | Economic transaction/pricing/closing date, or `period_end` for periodic rows. |
-| `period_start` | `YYYY-MM-DD` | Conditional | Start date of activity period (required for `monthly`/`quarterly`/`annual`; equals `event_date` for single-day transactions). |
-| `period_end` | `YYYY-MM-DD` | Conditional | End date of activity period. |
-| `shares` | decimal | Conditional | Positive share count (blank only if source disclosed dollars without shares). |
+| `event_date` | `YYYY-MM-DD` | Yes | Transaction/pricing/closing date, or `period_end` for periodic rows. |
+| `period_start` | `YYYY-MM-DD` | Conditional | Start of activity period (equals `event_date` for single-day transactions). |
+| `period_end` | `YYYY-MM-DD` | Conditional | End of activity period. |
+| `shares` | decimal | Conditional | Positive share count (blank only if source omitted shares or blended multi-class counts). |
 | `avg_price_usd` | decimal | Conditional | Per-share price in USD (disclosed or implied `amount_usd / shares`). |
-| `amount_usd` | decimal | Yes | Positive USD dollar amount of the event. |
-| `net_amount_usd` | decimal | Yes | Signed USD amount: `+amount_usd` for issuance, `-amount_usd` for buybacks/retirements. |
-| `valuation_basis` | string | Yes | How `amount_usd` is measured (`cash_paid`, `shares_times_avg_price`, `gross_proceeds`, `net_proceeds`, `fair_value_at_issuance`, `cash_proceeds`). |
-| `split_adjusted` | boolean (`true`/`false`) | Yes | Whether `shares` and `avg_price_usd` reflect a post-event stock split adjustment. |
-| `split_adjustment_note` | string | Yes | Explicit statement of split treatment (ratio/date if adjusted, or `unadjusted as reported on filing date`). |
-| `published_at` | ISO-8601 UTC | Yes | Earliest publication timestamp of this source (`YYYY-MM-DDTHH:MM:SSZ` from SEC `acceptanceDateTime`, or `YYYY-MM-DD` if time unavailable). |
+| `amount_usd` | decimal | Yes | Positive USD dollar amount. |
+| `net_amount_usd` | decimal | Yes | Signed USD amount (`+amount_usd` for issuance, `-amount_usd` for buybacks/retirements). |
+| `valuation_basis` | string | Yes | `cash_paid`, `shares_times_avg_price`, `gross_proceeds`, `net_proceeds`, `fair_value_at_issuance`, `cash_proceeds`, `vest_date_fair_value`. |
+| `split_adjusted` | boolean | Yes | Evidence-based flag indicating whether shares/prices reflect a post-event split adjustment. |
+| `split_adjustment_note` | string | Yes | Explicit split note (`unadjusted as reported on filing date` or exact ratio/date/filing). |
+| `published_at` | ISO-8601 UTC | Yes | Publication timestamp (`YYYY-MM-DDTHH:MM:SSZ` from SEC `acceptanceDateTime`, or `YYYY-MM-DD` if time unavailable). |
 | `published_at_precision` | enum string | Yes | `second`, `minute`, or `date`. |
 | `source_type` | enum string | Yes | `sec_10q`, `sec_10k`, `sec_8k`, `sec_424b`, `sec_s4`, `sec_sc_to_i`, `sec_other`, `company_announcement`, `sp_announcement`. |
-| `source_accession_number` | string | Conditional | SEC accession number (`0000000000-00-000000`), blank only for non-SEC primary announcements. |
+| `source_accession_number` | string | Conditional | SEC accession number (`0000000000-00-000000`), blank only for non-SEC announcements. |
 | `source_url` | URL | Yes | Direct URL to the primary filing or announcement. |
-| `source_location` | string | Yes | Exact XBRL concept+context, HTML table/item, or footnote/section reference. |
-| `extraction_method` | enum string | Yes | `direct` (taken verbatim from source) or `calculated` (derived via arithmetic). |
-| `calculation_formula` | string | Conditional | Exact formula and inputs when `extraction_method = calculated` (blank when `direct`). |
-| `is_revision` | boolean (`true`/`false`) | Yes | True if this row revises an earlier `published_at` observation of the same `event_key`. |
+| `source_location` | string | Yes | Exact XBRL concept+context, iXBRL dimension, HTML table/item, or footnote reference. |
+| `extraction_method` | enum string | Yes | `direct` or `calculated`. |
+| `calculation_formula` | string | Conditional | Exact arithmetic formula and source inputs when `calculated`. |
+| `is_revision` | boolean | Yes | True if this row updates/revises an earlier `published_at` observation of `event_key`. |
 | `supersedes_record_id` | string | Conditional | Prior `record_id` superseded by this revision. |
-| `include_in_net_aggregate` | boolean (`true`/`false`) | Yes | True for the active non-overlapping latest-revision rows used in headline S&P 500 net issuance totals (false for superseded revisions, replaced quarterly fallbacks, or out-of-scope supplemental rows). |
-| `notes` | string | Optional | Concise explanatory notes (e.g., secondary shares excluded, partial-quarter membership, ASR initial delivery). |
+| `include_in_net_aggregate` | boolean | Yes | True for latest non-overlapping in-scope rows forming the headline `NI_cash` series. |
+| `notes` | string | Optional | Concise provenance, superseding tags (`[superseded_at:...]`, `[replaced_by_...]`), and context. |
 
 ## 7. Required `output/README.md`
 
-Write a clear, concise `output/README.md` covering:
-1. Quick summary of files in `output/`.
+Keep `output/README.md` crisp and operational:
+1. Summary of all files in `output/`.
 2. Complete column dictionary for `events.csv`.
-3. Category definitions, sign conventions, valuation policy (especially employee equity & tax withholdings), and split-adjustment policy.
-4. How to run a **point-in-time query** for any historical `as_of_date` (filtering `published_at <= as_of_date` and taking the latest `published_at` per `event_key`).
-5. How to run the incremental pipeline in `work/src/` to pick up newly filed SEC documents going forward.
+3. Category definitions, sign conventions, valuation variants (`NI_cash`, `NI_sbc_fv`, Acadian `NI_sc`, float-adjusted, Baker-Wurgler), and split policy.
+4. Concrete **Point-in-Time Query Guide** showing how to query `events.csv` (and `pit.py`) for any historical `as_of_date`, with a concrete worked example of an event whose value/status evolved from announcement (`424B`/`8-K`) to `10-Q` confirmation.
+5. Exact **Continuous / Incremental Run Guide** (`--mode incremental`, automated S&P DJI + EDGAR daily index polling, recommended cron schedule, and rollback test summary).

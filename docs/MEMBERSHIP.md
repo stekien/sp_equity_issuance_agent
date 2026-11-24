@@ -1,58 +1,51 @@
 # Point-in-Time S&P 500 Membership Methodology
 
-Every company that was an S&P 500 member at any point during the covered window must be included—and its events counted **only while it was an active member**. All membership data in the output must come from **primary sources** (SEC filings, S&P Dow Jones Indices announcements, and company announcements). Wikipedia and financial portals may ONLY be used afterward to verify completeness and catch gaps.
+Every company that was an S&P 500 member at any point during the covered window must be included—and its events counted **only while it was an active member**. Every membership interval and effective date in the output must originate from **primary sources** (SEC filings and S&P Dow Jones Indices announcements). Wikipedia may ONLY be used afterward to verify completeness and catch gaps.
 
-## 1. Primary-Source Discovery Strategy
+## 1. Staged Execution Strategy
 
-### Step A: Authoritative Quarterly Snapshots via SEC Form `N-PORT-P`
-Major S&P 500 index-tracking ETFs (such as Vanguard S&P 500 ETF and iShares Core S&P 500 ETF) are SEC-registered investment companies that file **Form `N-PORT-P`** on SEC EDGAR containing complete XML schedules of portfolio holdings (issuer name, CUSIP, LEI, shares, market value, portfolio weight) as of each reporting period.
-1. Locate the trust/series CIKs on SEC EDGAR using EDGAR entity search or `https://www.sec.gov/files/company_tickers.json` / `https://efts.sec.gov/LATEST/search-index` (verify you select the specific S&P 500 index fund series, not an unrelated fund in the same trust).
-2. Download the `N-PORT-P` primary XML documents covering the trailing 12 months and going back to 2021 (typically 4 filings per year, plus the most recent filing available).
-3. Parse equity holdings (common stock holdings, excluding cash/futures/repo/money-market collateral) to build quarterly constituent snapshots.
-4. Capture each constituent's **portfolio weight** from the latest snapshot—this gives a free, primary-sourced materiality ranking for prioritizing Phase 3 extraction (largest weights first!).
+- **Phase 1 (Fast Trailing-12-Month Start, ~10–12 min)**:
+  - Build survivorship-free PIT membership for the **trailing 12 months** (current constituents + all additions, removals, mergers, and spin-offs in the past 12 months) using the 4–5 most recent quarterly ETF `N-PORT-P` filings plus S&P DJI announcements from the last 12 months.
+  - Set `membership_verified_back_to` to `T − 12 months` (recording `entered_before_verified_window = true` for continuing constituents). This immediately unblocks Phase 2 (Tier 1 XBRL + Milestone 1 Publish) without stalling on 2021–2024 delisted CIKs.
+- **Background Historical Expansion (`membership-researcher` subagent, launched immediately at end of Phase 1)**:
+  - Works continuously backward **one year at a time (`2025 → 2024 → 2023 → 2022 → 2021`)**, writing atomic staged JSON files (`work/staging_membership/year_{YYYY}.json`) that the main agent validates and integrates at batch boundaries (see `docs/ARCHITECTURE.md` §3).
+  - If the background worker doesn't finish all years before Phase 4, the main agent completes remaining years at the start of Phase 4.
 
-*Note on lag*: `N-PORT-P` filings have up to a ~60-day SEC reporting lag. Bridge the gap from the latest `N-PORT-P` report date to today using Step B below.
+## 2. Primary-Source Discovery Method
 
-### Step B: Exact Effective Dates via S&P Announcements & Company `8-K` Filings
-Comparing consecutive `N-PORT-P` snapshots immediately reveals every **addition** and **removal** (as well as mergers, ticker changes, and spin-offs) between snapshot dates, and S&P announcements cover any changes since the most recent `N-PORT-P`.
-1. For each detected change between snapshots—and for the window from the latest `N-PORT-P` up to today—find the **exact effective date** and **announcement publication timestamp** from primary sources:
-   - **S&P Dow Jones Indices press releases** (official S&P Global newsroom / syndicated primary press releases).
-   - **SEC EDGAR Full-Text Search** (`https://efts.sec.gov/LATEST/search-index`) searching `8-K` filings and press release exhibits (`EX-99.1`) mentioning S&P 500 addition/inclusion, merger closing (`Item 2.01` / `Item 5.01`), or spin-off distribution (`Item 8.01` / `Form 10`).
-2. Record the primary source URL / accession number and exact effective date (`member_start_date`, `member_end_date`) in the `constituents` table.
-3. If an exact effective date between two `N-PORT-P` snapshots cannot be confirmed from a primary source within your time budget, bound it transparently using the adjacent `N-PORT-P` snapshot dates and flag it explicitly in `COVERAGE.md` as an approximate boundary—never silently copy an unverified date from Wikipedia.
+### Step A: Dual-Fund Quarterly Snapshots via SEC Form `N-PORT-P`
+1. Locate **two** major S&P 500 index-tracking ETFs dynamically on SEC EDGAR via `https://www.sec.gov/files/company_tickers_mf.json` and EDGAR series listings (e.g., iShares Core S&P 500 ETF as primary and Vanguard 500 Index Fund / VOO as secondary cross-validation; verify the exact series ID belongs to the S&P 500 index fund, not another fund in the same trust).
+2. Download `N-PORT-P` primary XML filings (`primary_doc.xml`) covering the target window (quarterly snapshots).
+3. Parse equity holdings (`assetCat = EC`, excluding cash, futures, repo, and collateral). Extract issuer name, CUSIP, ISIN, LEI, share balance, USD market value, portfolio weight, and **implied quarter-end price (`valUSD / balance`)** — these weights prioritize Phase 3 extraction, and the quarter-end prices + share balances support Acadian Eq. (1) and float-adjusted verification!
+4. Cross-checking two S&P 500 funds immediately flags residual post-deletion holdings or tiny spin-off transients held briefly by one fund after an index change.
 
-### Step C: CIK Resolution (Including Departed & Acquired Companies)
-SEC's `company_tickers.json` only lists currently active filers. Departed, acquired, merged, or renamed historical S&P 500 members will often be missing from `company_tickers.json`!
-- Resolve active constituents via `company_tickers.json` / `company_tickers_exchange.json`.
-- Resolve departed or renamed constituents using SEC EDGAR entity search / `efts.sec.gov` by issuer name, historical ticker, CUSIP, or LEI from `N-PORT-P`.
-- Verify every mapped CIK by inspecting `submissions/CIK{cik10}.json` (confirm company name, former names, SIC code, and filing dates match the membership period).
-- Record each issuer's SIC code from `submissions` so you can cleanly classify **Financials** (typically SIC 6000–6799, verified for edge cases like REITs/fintechs) vs. **Nonfinancials** when comparing against Federal Reserve Z.1 nonfinancial corporate figures.
+### Step B: Exact Effective Dates via S&P DJI Announcements & SEC Filings
+Because `N-PORT-P` is quarterly and has up to a ~60-day SEC reporting lag:
+1. **Launch S&P Dow Jones Indices press release ingestion early** (`press.spglobal.com` / official S&P DJI index-change announcements) covering both the post-snapshot gap (latest `N-PORT-P` → today) AND all historical index changes back to 2021.
+2. Parse the exact S&P DJI effective date convention: *"effective prior to the opening of trading on date D"* means entrant `member_start_date = D` and departing company `member_end_date = D − 1 day`.
+3. For any change not covered by an S&P DJI release (such as holding-company reorganizations or mergers), confirm exact dates from SEC EDGAR (`8-K` Item 2.01 / 5.01 / 8.01, `8-K12B` successor filings, `Form 25-NSE` delisting notices, and `Form 10` spin-off distributions via `https://efts.sec.gov/LATEST/search-index`).
+4. Automate post-snapshot S&P DJI press release checking inside `--mode incremental` so ongoing runs detect newly announced index changes automatically without manual override files.
 
-## 2. Special Corporate Structures
+### Step C: Hardened CIK Resolution (Critical Edge Cases)
+Never rely naively on `company_tickers.json` (which omits departed/acquired companies) or raw metadata joins:
+1. **Never join on sentinel values**: `N-PORT-P` frequently reports `LEI = "N/A"` across dozens of issuers and `CUSIP = "000000000"` for foreign-domiciled constituents. Explicitly reject sentinel/blank LEIs and zero CUSIPs before matching!
+2. **Normalize issuer names carefully**: Strip legal suffixes (`INC`, `CORP`, `CO`, `LTD`, `PLC`, `HLDGS`), state/incorporation tags (`/DE/`, `/MA`), punctuation/apostrophes, and reversed EDGAR naming conventions (`"LAST FIRST INC"` vs. `"FIRST LAST INC"`).
+3. **Verify every mapped CIK against `submissions/CIK{cik10}.json`**: Confirm legal name / `formerNames`, active periodic-report history (`10-K`/`10-Q`) overlapping the membership window, and SIC code. Watch out for EDGAR name collisions with inactive shells, operating subsidiaries, or limited partnerships!
+4. **Holding-Company Successions & Reincorporations**: When an S&P 500 company reincorporates or restructures under a new holding-company CIK (`8-K12B` / `Form 25`), link the predecessor and successor CIKs as a **continuous index seat** (ending predecessor on succession date − 1, starting successor on succession date) — NEVER double-count overlapping pre-succession filings across both CIKs!
+5. **Debt-Only `Form 25` Trap**: Verify that a `Form 25` applies to common stock (not solely a redeemed bond/debt listing) before treating it as an equity delisting.
+6. **Residual ETF Positions & Spin-Off Transients**: An ETF may briefly hold shares of a removed stock or a newly spun-off subsidiary bound for the S&P MidCap 400 / SmallCap 600. Verify every brief appearance against S&P DJI announcements so non-S&P-500 spin-offs are not erroneously counted as members.
+7. **FDIC-Regulated Bank Filers**: A small number of state-chartered banks file periodic reports with the FDIC rather than SEC EDGAR. Identify any such historical constituents transparently, note their absence from EDGAR `companyfacts`, and disclose them explicitly in `COVERAGE.md`.
+8. **Financial vs. Nonfinancial Classification**: Record each CIK's SIC code from `submissions` and set `is_financial = true` for financials (SIC 6000–6799, noting REITs/fintech boundary policy clearly) so S&P 500 Nonfinancial totals align cleanly with Federal Reserve Z.1.
 
-### Multi-Share-Class Companies
-Some S&P 500 issuers have multiple share classes (either both classes included in the index or only one class included).
-- Detect multi-class constituents dynamically whenever two `N-PORT-P` holdings map to the same CIK or parent issuer.
-- **Zero double-counting rule**: Company-level SEC XBRL filings (`companyfacts`) report consolidated company-wide common stock buybacks and issuances across all common share classes. Never pull and sum the same CIK's XBRL totals twice for dual-ticker companies!
-- Store events at the **issuer (CIK) level** with `share_class` populated as specifically as the primary filing allows (e.g., `Class A`, `Class C`, or `All Common Classes` when the filing only reports a consolidated total). Document multi-class treatment explicitly in `output/README.md` and `COVERAGE.md`.
+## 3. Multi-Share-Class Companies, M&A & Spin-Offs
 
-### Mergers, Acquisitions, and Spin-Offs
-- **Acquirer in S&P 500 issues stock**: Record the shares issued in the acquisition under `issuance_acquisition` for the acquirer (while it is a member).
-- **Target in S&P 500 acquired for cash (or taken private)**: Membership ends on the effective delisting/closing date. Optionally record the equity retirement under `retirement_cash_merger` (clearly tagged and excluded from or shown separately alongside standard issuance/buybacks, per `docs/SCHEMA_AND_RULES.md`) so the Fed Z.1 / Acadian comparison can quantify cash M&A retirements cleanly.
-- **Target in S&P 500 acquired in a stock-for-stock deal by another S&P 500 member**: Membership of target ends on closing; acquirer's share issuance is recorded on the acquirer. Note the stock-for-stock offset clearly in `COVERAGE.md` when reconciling against aggregate market-wide net issuance (since stock-for-stock M&A within the index is economically net zero in aggregate!).
-- **Spin-offs**: A spun-off subsidiary distributed to existing S&P 500 shareholders raises $0 of new equity capital (it is a pro-rata distribution, not a capital-raising issuance). Do NOT count a pro-rata spin-off distribution as positive equity issuance! Track the new entity's S&P 500 membership start/end dates accurately if it enters (or briefly enters and exits) the index.
+- **Multi-Share-Class Issuers**: Detect whenever multiple `N-PORT-P` holdings map to the same CIK/parent issuer. Store consolidated company-level XBRL flows ONCE at the CIK level (never sum twice across dual tickers!), and populate `share_class` specifically whenever the filing breaks out classes (e.g., per-class buyback tables or per-class cover-page share counts).
+- **Stock-for-Stock M&A**: Record acquirer's issued shares under `issuance_acquisition` (while a member). End target's membership on closing date. In `COVERAGE.md`, explicitly quantify intra-index stock-for-stock offsets when bridging to market-wide aggregates.
+- **Cash M&A / Take-Privates**: End target's membership on closing date. Extract exact deal consideration (cash vs. stock split and per-share cash price) from the target's merger `8-K` (Item 2.01) or `DEFM14A` proxy statement (falling back to last `N-PORT-P` value only if unavailable, flagged clearly) and record cash retirements under supplemental `retirement_cash_merger` for transparent Fed Z.1 / Acadian bridging.
+- **Pro-Rata Spin-Offs**: A pro-rata spin-off distribution to existing shareholders raises $0 of new equity capital—NEVER record a pro-rata spin-off as positive equity issuance! (By contrast, a **split-off exchange offer** where parent shareholders tender parent shares to receive subsidiary shares IS a retirement of parent common stock—record under `buyback_tender_offer` with clear notes and show aggregates both with and without split-off exchanges.)
 
-## 3. Membership Boundary Rule for Period Events
+## 4. Membership Inclusion Rule & Verification Check
 
-- **Transaction-level events** (`granularity = transaction`): Include if and only if `member_start_date <= event_date <= member_end_date`.
-- **Monthly / Quarterly period events** (`granularity = monthly` or `quarterly`):
-  - Include if the entire period `[period_start, period_end]` falls within active membership.
-  - For a **partial-period** entry or exit (company joined or left mid-month or mid-quarter): prefer transaction/monthly data where available; if only a quarterly figure exists, apply a clear, deterministic rule (e.g., include if active on `period_end` OR prorate/flag clearly with `notes`) and document the exact rule and materiality impact in `COVERAGE.md`.
-
-## 4. Independent Verification Check (Wikipedia Cross-Check)
-
-After constructing the primary-source membership table:
-1. Fetch Wikipedia's S&P 500 constituent list and historical changes table strictly as a **verification check**.
-2. Compare: total current constituent count (~500 companies / ~503 listings), every addition/removal over the covered period, and exact effective dates.
-3. If Wikipedia reveals a constituent or change you missed, do **NOT** copy it from Wikipedia—instead, go back to SEC EDGAR (`N-PORT-P` / `8-K` / S&P announcements) to verify and ingest it from a primary source!
-4. Report the exact reconciliation statistics (matches, resolved gaps, any remaining unexplained differences) in `output/COVERAGE.md`.
+- **Transactions**: Included iff `member_start_date <= event_date <= member_end_date`.
+- **Periodic Rows (monthly/quarterly)**: Included iff active on `period_end` (preferring monthly/transaction granularity around entry/exit dates to minimize partial-quarter edge effects; document exact partial-period impact in `COVERAGE.md`).
+- **Mandatory Wikipedia Cross-Check (Verification Only)**: After integrating each membership window, compare against Wikipedia's S&P 500 constituent list and historical changes table. If Wikipedia surfaces a missed constituent or date, **never copy from Wikipedia**—go back to `N-PORT-P`, S&P DJI releases, or SEC `8-K`/`Form 25` to confirm and ingest from a primary source. Log exact match rate (e.g., `X/500` current CIKs, `Y/Z` change dates) in `COVERAGE.md`.

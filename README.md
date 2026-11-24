@@ -1,36 +1,40 @@
 # Point-in-Time S&P 500 Net Equity Issuance — Agent Instructions
 
-This repository contains instructions and Claude Code configuration for autonomously building a **point-in-time (bi-temporal)** dataset and analysis of S&P 500 net equity issuance from primary sources over a 4-hour run.
+This repository contains instructions and Claude Code configuration for autonomously building a **point-in-time (bi-temporal)** dataset, multi-methodology benchmark suite, publication charts, and coverage report of S&P 500 net equity issuance strictly from primary sources.
 
 ## Run Configuration
 
 - **Agent and model**: Claude Code with **Claude Opus 5.5**
 - **Pre-installed software**:
-  - `python3` (3.11 or newer) with `venv` and `pip` (optionally `uv` for faster package installs)
+  - `python3` (**Python 3.14**) with `python3-venv` and `pip` (optionally `uv` for faster installs)
   - `git`
   - `sqlite3`
   - `curl` and `ca-certificates`
-  - *(The agent will create a local Python virtual environment under `work/.venv` and install required Python packages such as HTTP, HTML/XML parsing, data analysis, and plotting libraries during Phase 0.)*
-- **Environment variables**: `SEC_USER_AGENT` (provided by the test harness per SEC EDGAR fair-access rules).
+  - *(The agent creates a local virtual environment under `work/.venv` and installs required Python packages using binary wheels, with pure-Python stdlib fallbacks if any C-extension wheel is unavailable on Python 3.14.)*
+- **Environment variables**:
+  - `SEC_USER_AGENT` (required; provided by the harness per SEC EDGAR fair-access policy — sent **only** to `sec.gov` hosts).
+  - `RUN_BUDGET_MINUTES` (optional; defaults to `240` for a 4-hour run; can be overridden for shorter smoke tests).
 
 ## Repository Layout
 
 | Path | Purpose |
 |---|---|
-| `CLAUDE.md` | Mission control: core invariants, phase schedule, checkpoint/resume loop, and subagent delegation rules. |
-| `docs/ARCHITECTURE.md` | Runtime directory structure, 4-hour time budget, SQLite state ledger, atomic publishing protocol, and incremental re-run design. |
-| `docs/MEMBERSHIP.md` | Primary-source methodology for point-in-time S&P 500 membership (additions, removals, mergers, spin-offs, multi-class shares). |
-| `docs/SOURCES_EDGAR.md` | SEC EDGAR rate-limiting, caching, Tier 1 XBRL extraction rules, Tier 2 HTML/filing parsers, and known EDGAR traps. |
-| `docs/SCHEMA_AND_RULES.md` | Event taxonomy, bi-temporal CSV schema, revision handling, split conventions, valuation rules, and provenance standards. |
-| `docs/VERIFICATION.md` | Internal share-count reconciliation, Fed Z.1 & Acadian external checks, charting spec, and `COVERAGE.md` requirements. |
+| `CLAUDE.md` | Mission control: invariants, staged phases, `RUN_BUDGET_MINUTES` scaling, `Continue.` resume protocol, and subagent orchestration. |
+| `docs/ARCHITECTURE.md` | Runtime layout, timing telemetry, cross-process EDGAR rate limiter, staged membership handoff, idempotent post-processing DAG, atomic publishing, and continuous `--mode incremental` design. |
+| `docs/MEMBERSHIP.md` | Primary-source point-in-time S&P 500 membership methodology (dual ETF `N-PORT-P` + S&P DJI releases + SEC successions + edge cases + Wikipedia verification). |
+| `docs/SOURCES_EDGAR.md` | Tier 1 XBRL/iXBRL dimensional rules, Tier 2 parsers for every buyback & issuance category, golden test corpus, and known SEC filing pitfalls. |
+| `docs/SCHEMA_AND_RULES.md` | Bi-temporal CSV schema (`events.csv`), transaction lifecycle revision chains, complete buyback/issuance taxonomy, valuation variants, and split rules. |
+| `docs/VERIFICATION.md` | Trusted verification sources, all Acadian methodology versions, Federal Reserve Z.1 & Table 1.46 benchmarks, editorial chart spec with mega-IPO annotations, and `COVERAGE.md` template. |
 | `.claude/settings.json` | Portable Claude Code workspace permissions. |
-| `.claude/agents/filing-analyst.md` | Subagent for inspecting ambiguous or high-value raw SEC filings. |
-| `.claude/agents/qa-auditor.md` | Independent adversarial QA subagent run prior to final publication. |
+| `.claude/agents/membership-researcher.md` | Background subagent expanding historical PIT membership year-by-year via staged JSON handoff. |
+| `.claude/agents/filing-analyst.md` | Specialist subagent reading cached primary SEC filings for complex transactions and anomalies. |
+| `.claude/agents/market-verifier.md` | Independent check-only subagent cross-verifying numbers against Yahoo Finance, Google Finance, S&P DJI buyback reports, and market portals. |
+| `.claude/agents/benchmark-researcher.md` | Independent check-only subagent extracting all Acadian methodology versions, Fed Z.1/FRB Table 1.46, Wikipedia membership checks, and mega-IPO details (SpaceX, Anthropic, etc.). |
+| `.claude/agents/qa-auditor.md` | Adversarial QA auditor enforcing structural, semantic, bi-temporal, and benchmark integrity across early and final checkpoints. |
 
 ## Design Highlights
 
-1. **Always-Shippable Incremental Output**: The agent publishes a complete, schema-validated `output/` set early (after building the full-universe XBRL baseline) and atomically refreshes `output/` after every milestone. Even if stopped abruptly at 4:00, the repository holds a clean, consistent deliverable.
-2. **Primary-Source Membership**: Uses SEC `N-PORT-P` holdings filings of S&P 500 index ETFs combined with S&P Dow Jones Indices announcements and company `8-K` filings to construct historical membership, using Wikipedia solely as an independent verification check.
-3. **Three-Tier Extraction**: Combines breadth-first SEC XBRL `companyfacts` + `submissions` across all historical S&P 500 members with depth-first deterministic parsing of monthly buyback tables, equity prospectuses, `8-K` filings, and tender offers, plus targeted subagent analysis for complex deals and anomalies.
-4. **True Bi-Temporal Provenance**: Separates economic event/period dates from exact SEC `acceptanceDateTime` publication timestamps, preserves all revisions without overwriting, and enforces internal share-count reconciliation alongside Federal Reserve Z.1 and Acadian cross-checks.
-5. **Continuous Operation**: Stores filing watermarks per CIK and supports incremental polling of new SEC EDGAR filings on subsequent runs.
+1. **Staged, Always-Shippable Architecture**: Builds trailing-12-month primary-source membership first to unlock Milestone 1 `output/` early, while a background `membership-researcher` expands survivorship-free membership backward to 2021 via atomic staged JSON handoffs and fast integration checks.
+2. **True Bi-Temporal Event Chains & Full Category Coverage**: Tracks offering, ASR, tender offer, ATM, M&A, employee-equity, warrant, and conversion events from initial announcement (`8-K`/`424B`/`SC TO-I`) through closing/settlement and `10-Q`/`10-K` confirmation under linked `event_key` revision chains, so any historical `as_of_date` reconstructs exactly what was known then.
+3. **All Acadian & Fed Z.1 Methodologies Computed and Reconciled**: Produces and compares bottom-up cash-flow event net issuance, SBC-fair-value/cash-M&A variants, Acadian Eq. (1) market-cap/share-count net issuance (total and `% of market cap`, plus Magnificent Seven), Acadian float-adjusted net issuance, Baker-Wurgler equity share `E/(E+D)`, and Federal Reserve Z.1 (`FU103164105.Q`) — with major IPO events (including SpaceX and Anthropic) directly annotated on the graphics.
+4. **Continuous Incremental Operation**: Designed from Phase 0 around per-CIK watermarks, EDGAR daily-index polling, automated S&P DJI release checks, and an end-to-end incremental rollback test.

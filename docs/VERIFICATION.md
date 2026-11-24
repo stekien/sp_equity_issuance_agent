@@ -1,81 +1,97 @@
-# Verification, External Benchmarking, Charting, and Coverage Reporting
+# Verification, All Acadian & Fed Methodologies, Trusted Check Sources & Charting
 
-## 1. Automated Integrity Checks (Run Before Every Atomic Publish)
+## 1. Trusted Source Boundary (Primary Sources vs. Check-Only Websites)
 
-Every staging build in `work/staging_output/` must pass automated validation:
-1. **Schema & Types**: Exact required columns, valid ISO dates/timestamps, valid category/direction/method enums, non-null required fields.
-2. **Temporal Sanity**: Flag any row where `published_at < period_end` (allowable only for pre-announced transactions such as priced offerings before closing date or announced tender offers—must be explained in `notes`). Flag any look-ahead leakage (e.g., a Q1 row carrying a later 10-K timestamp without being marked as a revision).
-3. **Zero Double-Counting**:
-   - Zero duplicate `(event_key, published_at, source_accession_number)` rows.
-   - Among rows with `include_in_net_aggregate = true`, verify no overlapping `(cik, category_group, period)` pairs exist (e.g., monthly buybacks AND quarterly XBRL fallback both `true`, or superseded revision still `true`).
-   - Verify no dual-class CIK has duplicated XBRL totals across two tickers.
-4. **Unit & Magnitude Outlier Scan**:
-   - Flag any single company-month or single event exceeding $30B (possible 1,000x unit-scaling bug from `"in thousands"` HTML tables, or debt/structured-note `424B2` leakage!) and inspect every single flagged row before publishing.
-   - Flag any `avg_price_usd` below $1 or above $10,000 (except genuinely high-priced stocks verified against market prices) as a likely unit mismatch between shares and dollars.
+Respect this boundary strictly:
 
-## 2. Internal Balance-Sheet Share-Count Reconciliation (Phase 5)
+- **Primary Sources (Allowed as Sources of Output Numbers & Membership)**:
+  - SEC EDGAR (`data.sec.gov`, `www.sec.gov`, `efts.sec.gov`)
+  - S&P Dow Jones Indices press releases (`press.spglobal.com`, `spglobal.com/spdji`)
+  - Official Company Investor Relations press releases & wire releases (Business Wire, PR Newswire, GlobeNewswire)
+- **Authoritative Macro Benchmarks (For Benchmark Verification & Charts)**:
+  - Federal Reserve Board Z.1 Financial Accounts (`https://www.federalreserve.gov/releases/z1/` — download `z1_csv_files.zip` directly if FRED times out; Table F.5.1.1 / S11.1, series `FU103164105.Q` NSA quarterly and `FA103164105.Q` SAAR)
+  - Federal Reserve Board Table 1.46 (New Security Issues of U.S. Corporations — gross stock and corporate bond issues, used by Baker & Wurgler and Acadian Figure 3)
+  - FRED (`https://fred.stlouisfed.org/graph/fredgraph.csv?id=NCBEILQ027S` as secondary mirror of `FA103164105.Q`)
+  - Acadian Asset Management (`https://www.acadian-asset.com/investment-insights/owenomics/the-smart-money-is-selling-equity` and linked Owenomics methodology notes)
+  - S&P Dow Jones Indices Quarterly Buybacks press releases (official published S&P 500 quarterly aggregate buyback totals — an exceptionally strong aggregate sanity check!)
+- **External Verification Websites (Strictly CHECK-ONLY — NEVER use as the source of any output number!)**:
+  - **Yahoo Finance** (`finance.yahoo.com`) — check stock splits, historical share counts, market caps, recent offerings/buybacks, and mega-IPO tickers/dates.
+  - **Google Finance** (`google.com/finance`) — check current prices, market caps, corporate event summaries, and multi-class share listings.
+  - **Wikipedia** (`en.wikipedia.org/wiki/List_of_S%26P_500_companies`) — check S&P 500 constituents and historical additions/removals.
+  - **StockAnalysis** (`stockanalysis.com`) & **Macrotrends** (`macrotrends.net`) — check multi-year share-count histories, buyback histories, and IPO listings.
+  - **Renaissance Capital** (`renaissancecapital.com`) & **Nasdaq / NYSE IPO & Corporate Actions Calendars** (`nasdaq.com`) — verify major U.S. IPO dates, proceeds raised vs. initial market cap (including SpaceX, Anthropic, and other 2025–2026 mega-IPOs).
+  - **Financial News** (Reuters, Morningstar, WSJ, FT) — verify context around mega-deals, ASRs, M&A closings, and major IPOs.
 
-For each covered company-quarter (using `CommonStockSharesOutstanding` / `EntityCommonStockSharesOutstanding` from `companyfacts`, adjusted for any stock splits in that quarter):
-- Compute `observed_delta_shares = shares_outstanding(t) - shares_outstanding(t-1)`.
-- Compute `explained_net_shares = sum(shares_issued) - sum(shares_repurchased)` over the same quarter.
-- Compute `residual_shares = observed_delta_shares - explained_net_shares` and approximate dollar residual (`residual_shares * avg_price`).
-- Rank the **top 20 largest unexplained residuals** by estimated dollar magnitude and dispatch `.claude/agents/filing-analyst.md` to diagnose them (common root causes: missed M&A share issue, missed ASR delivery, unrecorded RSU vesting/tax withholding, unadjusted stock split, or convertible note conversion).
-- Summarize reconciliation coverage and residual distribution honestly in `output/COVERAGE.md`.
+**Golden Rule of Web Verification**: Whenever `market-verifier` or `benchmark-researcher` discovers a discrepancy via a check-only website (e.g., a missed IPO, wrong split ratio, missed buyback quarter, or missing M&A deal), do **NOT** copy the web number into `events.csv`. Instead, locate the corresponding **primary SEC filing or official announcement** and ingest the primary-sourced fact!
 
-## 3. External Benchmark Comparisons (Phase 6)
+## 2. Computing & Reconciling ALL Acadian & Fed Z.1 Methodologies
 
-### A. Federal Reserve Z.1 Financial Accounts (Nonfinancial Corporate Net Equity Issuance)
-1. Fetch the Federal Reserve's quarterly nonfinancial corporate business net equity issuance series directly from official public endpoints:
-   - FRED series `NCBEILQ027S` (CSV endpoint: `https://fred.stlouisfed.org/graph/fredgraph.csv?id=NCBEILQ027S`) and/or Federal Reserve Board Z.1 release data (Table F.223 / L.223).
-2. **CRITICAL UNIT CHECK**: Verify the exact units and annualization of the downloaded series! FRED `NCBEILQ027S` is typically reported in **Millions of Dollars, Seasonally Adjusted Annual Rate (SAAR)**. To compare against quarterly unadjusted dollar totals in billions, divide SAAR millions by `4,000` (check series metadata/header carefully before converting—never guess!).
-3. Compare **quarterly from 2021 to latest available 2026 quarter**:
-   - Plot/tabulate S&P 500 **Total** net issuance, S&P 500 **Nonfinancial** net issuance (`is_financial = false`), and **Fed Z.1 Nonfinancial** net issuance side by side.
-   - Compute correlation, sign agreement by quarter, and ratio of S&P 500 Nonfinancial to Fed Z.1.
-   - Explain structural differences (Fed Z.1 covers all US nonfinancial corporations including private/non-S&P-500 firms and includes cash M&A retirements, whereas S&P 500 covers ~500 large public firms).
+Read the Acadian article (`the-smart-money-is-selling-equity`) in full via `benchmark-researcher` and compute **every single methodology version** described in the article for the S&P 500 so all definitions can be compared like-for-like:
 
-### B. Acadian Asset Management Benchmark (November 2026)
-1. Fetch and read the benchmark article referenced in the exercise:
-   `https://www.acadian-asset.com/investment-insights/owenomics/the-smart-money-is-selling-equity`
-2. Extract Acadian's exact methodology, time window (12 months to 12 November 2026), headline total, and ex-SpaceX figures directly from the article.
-3. Construct a quantitative **reconciliation bridge** in `COVERAGE.md` comparing your S&P 500 trailing-12-month net issuance to Acadian's total US market figure, explicitly accounting for:
-   - Universe difference (S&P 500 vs. total US market, including mega-IPOs outside the S&P 500 such as SpaceX / Anthropic, depending on whether either entered the S&P 500 during the window).
-   - Cash M&A retirements vs. buybacks.
-   - Valuation differences (e.g., SBC/RSU treatment, net share settlement).
-   - Cutoff date differences (12 Nov 2026 vs. today's run date).
+1. **Version 1 — Bottom-Up Cash-Flow Event Net Issuance (`NI_cash`, Headline from `events.csv`)**:
+   - Sum of primary offerings, M&A share fair value, conversions, warrants, and employee-plan cash proceeds minus buybacks (open-market, ASR, tender/exchange), allocated pro-rata by days to calendar quarters (plus monthly trailing-12-month detail).
+   - Also compute event-level sensitivity variants: (a) with RSU `tax_withholding_net_settlement`, (b) with `issuance_employee_equity` valued at vest-date fair value (`NI_sbc_fv`), (c) with `retirement_cash_merger`, and (d) excluding non-cash split-off exchanges.
+2. **Version 2 — Acadian Equation (1) Total Market-Cap / Share-Count Net Issuance (`NI_sc`)**:
+   - Formula from Acadian Eq. (1): `Net_Issuance(t) = Market_Cap(t) - Market_Cap(t-1) * P(t) / P(t-1)` = `Δ(split-adjusted shares outstanding) * P(t)`.
+   - Compute both in **USD billions** AND as **% of total S&P 500 market cap** (trailing 12 months, matching Acadian Figure 1 & Table 1).
+   - Use SEC balance-sheet (`CommonStockSharesOutstanding`), cover-page (`EntityCommonStockSharesOutstanding`), AND dimensional/per-class iXBRL share counts combined with `N-PORT-P` quarter-end prices — **explicitly solve per-class and rounded-share-count issuers so ALL Magnificent Seven members (including dual-class and large semiconductor issuers!) are included cleanly without omissions!**
+   - Report the **Magnificent Seven** sub-cut explicitly alongside total S&P 500 to verify directly against Acadian Table 1.
+3. **Version 3 — Acadian Figure 2 Float-Adjusted Net Issuance Analog (`NI_float`)**:
+   - Apply Equation (1) using **float-adjusted shares** (derivable from S&P 500 index-tracking ETF `N-PORT-P` share balances scaled by the ETF's unit/divisor ratio, or filing-disclosed float adjustments) to verify whether free-float adjustments alter the 2026 turn.
+4. **Version 4 — Acadian Figure 3 Baker & Wurgler (2000) Equity Share (`E / (E + D)`)**:
+   - Compute trailing-12-month `E / (E + D)` for S&P 500 constituents from primary SEC XBRL gross equity issuance (`E`, dollars raised) and gross corporate debt issuance (`D`, from `ProceedsFromIssuanceOfLongTermDebt` / `ProceedsFromIssuanceOfDebt`).
+   - Compare against **Federal Reserve Board Table 1.46** macro `E / (E + D)` and 12-month changes in `E` and `D` (showing the debt-then-equity cycle highlighted by Acadian Figure 3).
+5. **Version 5 — Federal Reserve Z.1 Benchmark (`FU103164105.Q`)**:
+   - Pull `FU103164105.Q` (NSA quarterly `$M`, divide by `1,000` for `$B`) and verify `FA103164105.Q / 4 == FU103164105.Q` directly from Federal Reserve Board `z1_csv_files.zip` (Table F.5.1.1 / S11.1; fallback to FRED `NCBEILQ027S / 4,000`).
+   - Compare quarterly 2021–2026 against **S&P 500 Nonfinancials** (`is_financial = false`) and **Total S&P 500**, reporting sign agreement, correlation, and cumulative ratio.
+6. **S&P DJI Quarterly Buybacks Cross-Check**:
+   - Compare our S&P 500 quarterly gross buybacks against official S&P Dow Jones Indices quarterly S&P 500 buyback press releases (via `market-verifier`) — one of the sharpest direct sanity checks available!
 
-### C. Spot-Check Audit (via `qa-auditor` Subagent)
-Before finalizing Phase 6, invoke `.claude/agents/qa-auditor.md` to independently verify at least **10 diverse high-impact records** directly against raw SEC filings (and cross-check sanity against public financial portals/news as allowed for checking):
-- Top 3 largest buyback quarters/months
-- Top 3 largest equity offerings or M&A share issuances
-- At least 1 ASR and/or tender offer
-- At least 1 multi-share-class company
-- At least 1 company that entered or exited the S&P 500 during the period
-- At least 1 revised/restated observation (`is_revision = true`)
+## 3. Automated Validation, Identities & Multi-Stage Audits
 
-## 4. Chart Specification (`output/net_equity_issuance.svg` & `.png`)
+### Blocking Structural & Semantic Checks (Every Publish)
+1. Schema, required fields, enums, ISO UTC timestamps, `source_accession_number`, `source_url`, `source_location`, `split_adjustment_note`.
+2. **Fiscal-Year Reconciliation (`Σ quarters == FY`)** per issuer and concept family (blocking on over-counting!).
+3. **Zero Double-Counting**: No overlapping included monthly/quarterly/annual/transaction rows, no dual-class CIK duplication, no twin-of-anchor rows, no preferred/NCI leakage.
+4. **Bi-Temporal Verification**: Blocking check that `pit.as_of(latest) == headline`, plus automated test checks at 3+ earlier `as_of_date` snapshots confirming lifecycle chains evolve cleanly as filings arrive.
+5. **Regression Snapshot Diff**: Compare company-year totals against the previous publish; log any delta > $500M so rule changes never silently regress earlier fixes.
+6. **Outlier Guard**: Flag any single event > $30B or `avg_price_usd` outside `[$1, $20,000]` (except verified ultra-high-price shares) for mandatory review.
 
-Generate both vector (`output/net_equity_issuance.svg`) and high-DPI raster (`output/net_equity_issuance.png`, 300 DPI) versions of a clean, publication-grade chart:
-- **Primary view**: Quarterly (or monthly if cleanly covered without noisy quarterly-fallback spikes—if mixed, aggregate to **calendar quarters** for visual comparability with Fed Z.1, and optionally add a second panel or subplot showing the trailing-12-month monthly series!).
-- **Recommended clean two-panel layout** (12" × 7.5" or similar clean aspect ratio, light background, crisp sans-serif typography, minimal chartjunk, clear `$B` USD y-axis with prominent `y = 0` baseline):
-  - **Top panel (Main chart)**: S&P 500 Net Equity Issuance by quarter over the covered period (distinct colors for negative net issuance / net buybacks vs. positive net issuance, clearly highlighting the 2026 turn if present, with Gross Issuance and Gross Buybacks shown cleanly or stacked behind a bold Net Issuance line/bar).
-  - **Bottom panel (Benchmark comparison)**: S&P 500 Nonfinancial Net Issuance vs. Federal Reserve Z.1 US Nonfinancial Corporate Net Equity Issuance (converted to matching quarterly `$B` units!), illustrating how the two series tell the same directional story while differing in universe breadth.
-- Include clear title, informative subtitle (exact period covered, S&P 500 PIT scope, number of companies), direct legend, zero-line label, and bottom source footnote (`Source: Primary SEC EDGAR filings (10-K, 10-Q, 8-K, 424B, SC TO-I, N-PORT-P); Federal Reserve Z.1 (NCBEILQ027S). Point-in-time as of <run date>.`).
-- **Visually inspect** the rendered PNG (or verify layout dimensions, non-overlapping labels, legible axes) before final publish!
+### Internal Share-Count Reconciliation (Phase 5)
+- Compute `ΔS_obs − (S_issued − S_repurchased)` across all company-quarters; investigate the top 20–25 dollar residuals with `filing-analyst`.
+
+### Multi-Stage Audits & External Web Verification
+- **Early Audit (end of Phase 2 / Milestone 1)**: Fast `qa-auditor` pass to catch semantic XBRL bugs (preferred/NCI/context/twins) before bulk Tier 2 runs.
+- **Web Verification Pass (Phase 5)**: Dispatch `market-verifier` (Yahoo Finance, Google Finance, S&P DJI buybacks, StockAnalysis, Nasdaq) to verify the top 25 S&P 500 movers, major splits, S&P 500 buyback totals, and mega-IPO details (SpaceX, Anthropic, etc.).
+- **Final Adversarial Audit (Phase 6)**: Full `qa-auditor` pass including ≥ 15 raw-filing spot-checks (top buybacks, top offerings, ASRs, tender/split-off offers, ATMs, M&A, multi-class, S&P additions/removals, and multi-filing revision chains). Must achieve `PASS` before final publish.
+
+## 4. Editorial Chart Specifications & Mega-IPO Callouts
+
+Adopt a clean, understated editorial aesthetic modeled on modern financial publications (warm off-white canvas `#fcfcfb`, dark charcoal title `#0b0b0b`, muted subtitle `#52514e`, subtle horizontal gridlines `#e1e0d9`, crisp zero baseline `#c3c2b7`, clean sans-serif typography, **programmatic label-collision checks** so zero text overlaps, rendered as both `.svg` and 300-DPI `.png`):
+
+### Chart 1: `output/net_equity_issuance.svg` & `.png`
+- **Top Panel (Main S&P 500 Quarterly Series, 2021–2026)**:
+  - Clean rounded-tip quarterly bars (blue `#2a78d6` / coral-red distinction or stacked Gross Issuance & Buybacks with bold Net Issuance series, `$bn per quarter`, prominent `y = 0` line, clear direct data labels on key peaks/troughs and latest quarter).
+  - **Direct Mega-IPO Timeline Annotations**: Place subtle vertical dashed markers and crisp callout labels directly on the timeline for major U.S. market IPO events discovered from primary filings/benchmarks — **at minimum SpaceX IPO (Jun 2026) and Anthropic IPO (Nov 2026)**, plus any other top-tier mega-IPO in the window — clearly stating date, scale (e.g., initial market cap & proceeds raised verified from SEC S-1/424B4), and whether it is inside or outside the S&P 500!
+- **Bottom Panel (Federal Reserve Z.1 Benchmark)**:
+  - S&P 500 Nonfinancial Net Issuance vs. **Federal Reserve Z.1 (`FU103164105.Q`, Table F.5.1.1, not seasonally adjusted, `$bn` per quarter)** with the same SpaceX / Anthropic timeline markers explaining the 2026 divergence.
+- Crisp bottom source footnote citing exact primary SEC filings, S&P DJI releases, Fed Z.1 `FU103164105.Q`, and point-in-time run date.
+
+### Chart 2: `output/acadian_comparison.svg` & `.png`
+- **Top Panel (Multi-Methodology Rolling 12-Month Net Issuance)**:
+  - Compares all methodologies side-by-side over 2021–2026: (1) S&P 500 Cash-Flow Headline (`NI_cash`), (2) S&P 500 SBC-Fair-Value Event Basis (`NI_sbc_fv`), (3) S&P 500 Acadian Eq. (1) Share-Count × Price (`NI_sc`), (4) S&P 500 Float-Adjusted Analog (`NI_float`), and (5) Acadian All-U.S. ex-SpaceX & incl. SpaceX markers — with **explicit SpaceX IPO and Anthropic IPO callouts** (noting SpaceX's off-scale total market cap vs. proceeds raised and Anthropic's post-Acadian-cutoff timing!).
+- **Bottom Panel (Baker-Wurgler Equity Share `E / (E + D)`)**:
+  - S&P 500 primary-filing `E / (E + D)` vs. Federal Reserve Board Table 1.46 macro `E / (E + D)` over the covered window, with SpaceX and Anthropic IPO timeline markers.
 
 ## 5. Required Structure of `output/COVERAGE.md`
 
-Make `output/COVERAGE.md` transparent, quantitative, and ruthlessly honest:
-1. **Executive Summary**: Date range covered, total unique S&P 500 historical members identified vs. covered by Tier 1 / Tier 2 / Tier 3, total event rows, headline trailing-12-month and multi-year Gross Issuance, Buybacks, and Net Issuance.
-2. **S&P 500 Membership Methodology & Verification**: Primary sources used (`N-PORT-P` funds/periods, S&P announcements, `8-K`s), total additions/removals/mergers/spin-offs/multi-class firms handled, and exact results of the Wikipedia cross-check (matches and any discrepancies).
-3. **Coverage Matrix & What Was Not Covered**:
-   - Table by year/quarter showing company count, % of index weight covered at Tier 1 (XBRL) vs. Tier 2 (monthly buyback tables & offerings/8-Ks), and exact list/count of companies, filings, or historical periods NOT reached before the 4-hour cutoff (and why).
-4. **Verification & Reconciliation Results**:
-   - Automated integrity check results (pass/fail counts, unit-outlier resolutions).
-   - Internal share-count balance-check statistics and top discrepancies investigated.
-   - Federal Reserve Z.1 quarterly comparison table & correlation/magnitude commentary.
-   - Acadian (Nov 2026) methodology & reconciliation bridge.
-   - `qa-auditor` spot-check summary (records checked, defects found and fixed).
-5. **What May Be Wrong & Known Limitations**:
-   - Explicitly list every known weakness, edge case, unverified membership boundary, employee-SBC valuation assumption, partial-quarter membership edge case, or noisy filing parser area. Evaluators value calibrated honesty far more than false perfection.
-6. **Incremental / Continuous Operation**:
-   - Brief note confirming watermark status and how subsequent runs pick up new SEC filings.
+1. **Executive Summary**: Date range covered, total unique PIT S&P 500 issuers identified vs. covered by tier, event & revision-chain counts, headline trailing-12-month & annual totals across all methodology versions.
+2. **S&P 500 PIT Membership & Verification**: Primary sources (dual ETF `N-PORT-P` + S&P DJI releases + SEC successions), additions/removals/mergers/spin-offs/multi-class counts, FDIC-regulated bank disclosures, and exact Wikipedia cross-check match rate.
+3. **Coverage Matrix & Explicit Gaps**: Breakdown by year/quarter and by **all** buyback & issuance categories (`open_market`, `asr`, `tender_offer`, `underwritten`, `atm`, `acquisition`, `employee_equity`, `warrant`, `conversion`, plus residual `unspecified`/`other_common` %), plus an explicit list of companies/periods NOT covered before cutoff.
+4. **Verification, Web Cross-Checks & Multi-Methodology Reconciliation**:
+   - Blocking validator results, FY reconciliation, and PIT `as_of(D)` multi-date test results.
+   - Internal share-count identity statistics and top residuals investigated.
+   - All Acadian versions comparison table (Cash-flow, SBC-FV, Eq. 1 `$B` & `% mkt cap`, Magnificent Seven, Float-adjusted, Baker-Wurgler `E/(E+D)`), Fed Z.1 (`FU103164105.Q`) comparison, and S&P DJI Quarterly Buybacks cross-check.
+   - Summary of `market-verifier` (Yahoo Finance / Google Finance / IPO calendars) and `qa-auditor` spot-checks (records checked, defects found & fixed).
+5. **Run Timing Telemetry & Continuous-Run Proof**: Summary table from `phase_timings` (wall-clock duration per phase/batch) + result of the Phase 6 7-day watermark-rollback `--mode incremental` test.
+6. **Honest Assessment: What May Be Wrong & Known Limitations**: Candid list of residual data limitations, edge cases, parser weaknesses, and uncertainty bounds.
