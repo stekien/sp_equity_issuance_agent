@@ -48,19 +48,19 @@ Apply these exact `category` values consistently across every row:
    *(For multi-filing corporate transactions—e.g., an offering priced in a `424B5`, expanded by greenshoe in an `8-K`, and confirmed in a `10-Q`; an ASR announced in an `8-K` and settled 3 months later; or a tender offer announced in `SC TO-I` and finalized in `SC TO-I/A`—link all lifecycle observations under a **shared `event_key`** so an `as_of_date` query never drops the event between announcement and quarterly confirmation!)*
 2. **Never Overwrite Prior Observations**:
    - Every newly filed update, settlement, greenshoe, or restatement creates a **new row** with its own `record_id`, the new filing's `published_at` (`acceptanceDateTime` UTC), `is_revision = true`, and `supersedes_record_id = <prior record_id>`.
-   - Append `[superseded_at:<new_published_at>]` to the prior row's `notes` and set `include_in_net_aggregate = false` on the superseded row while keeping the row intact in `events.csv`.
+   - Populate the first-class **`superseded_at`** column on the prior row with the newer row's `published_at` (leaving `superseded_at` blank on active rows) and set `include_in_net_aggregate = false` on the superseded row while keeping the row intact in `events.csv`.
 3. **Exact Point-in-Time `as_of(D)` Operator**:
-   - Implement a reusable library (`work/src/<pkg>/pit.py`) computing `as_of(D)` for any timestamp `D`:
+   - Implement a reusable library (`work/src/<pkg>/pit.py`) computing `as_of(D)` for any timestamp `D` cleanly using the first-class `superseded_at` column (zero regex on `notes`!):
 
 ```text
-K(D) = { r : published_at(r) <= D, latest published_at per event_key }
-A(D) = { r in K(D) : include_in_net_aggregate == 1  OR  (superseded_at(r) > D and in_scope(r)) }
+A(D) = { r : in_scope(r) and published_at(r) <= D and (superseded_at(r) == "" or superseded_at(r) > D) }
+Headline_as_of(D) = sum_{r in A(D)} net_amount_usd(r) * member_overlap_fraction(r)
 Check: A(max published_at) == { r : include_in_net_aggregate == 1 }
 ```
 
    - Enforce `A(max published_at) == headline` as a **blocking validator check**, AND verify `as_of(D)` at ≥ 3 intermediate historical dates **inside the trailing-12-month headline window** (e.g., right after a major `424B5`/`8-K` offering or ASR before the `10-Q` was filed) to prove live point-in-time reconstruction works where it matters most!
 4. **Granularity Superseding (Zero Double-Counting)**:
-   - When monthly buybacks or transaction-level offerings/ASRs/M&A supersede an overlapping Tier 1 quarterly XBRL fallback row, set `include_in_net_aggregate = false` on the fallback row (tagging `[replaced_by_monthly:...]` or `[replaced_by_tier3:...]`) so summing `include_in_net_aggregate == true` never double-counts.
+   - When monthly buybacks or transaction-level offerings/ASRs/M&A supersede an overlapping Tier 1 quarterly XBRL fallback row, populate `superseded_at` (with the replacing row's `published_at`) and set `include_in_net_aggregate = false` on the fallback row (noting the replacement in `notes`) so summing `include_in_net_aggregate == true` never double-counts.
 
 ## 5. Evidence-Based Stock Split Policy
 
@@ -81,9 +81,11 @@ UTF-8, RFC 4180 CSV, sorted deterministically by `event_date`, `cik`, `category`
 | `share_class` | string | Yes | Share class (`Common`, `Class A`, `Class B`, `All Common Classes`). |
 | `security_type` | string | Yes | `common_stock`. |
 | `is_financial` | boolean | Yes | Financial-sector flag (SIC 6000–6799) for Fed Z.1 nonfinancial comparison. |
-| `sp500_member_on_event_date` | boolean | Yes | True iff issuer was an active S&P 500 member on `event_date`/`period_end`. |
+| `sp500_member_on_event_date` | boolean | Yes | True iff `member_overlap_fraction > 0` (active on transaction date or periodic row overlaps active membership). |
+| `member_overlap_fraction` | decimal (0.0–1.0) | Yes | `1.0` for active transactions & full-member periods, `0.0` outside membership, `overlap_days / total_days` for routine straddling periodic rows (preserves raw SEC `amount_usd` while allowing exact `net_amount_usd * member_overlap_fraction` aggregation). |
 | `category` | enum string | Yes | Controlled category from Section 2. |
 | `direction` | enum string | Yes | `issuance`, `buyback`, or `retirement`. |
+| `event_status` | enum string | Yes | `completed` (settled/executed/reported), `announced_or_priced` (priced offering / launched ASR or tender prior to closing/10-Q), or `announced_unsettled` (forward-sale agreement prior to share delivery; `include_in_net_aggregate = false` until settled). |
 | `granularity` | enum string | Yes | `transaction`, `monthly`, `quarterly`, or `annual`. |
 | `event_date` | `YYYY-MM-DD` | Yes | Transaction/pricing/closing date, or `period_end` for periodic rows. |
 | `period_start` | `YYYY-MM-DD` | Conditional | Start of activity period (equals `event_date` for single-day transactions). |
@@ -105,8 +107,9 @@ UTF-8, RFC 4180 CSV, sorted deterministically by `event_date`, `cik`, `category`
 | `calculation_formula` | string | Conditional | Exact arithmetic formula and source inputs when `calculated`. |
 | `is_revision` | boolean | Yes | True if this row updates/revises an earlier `published_at` observation of `event_key`. |
 | `supersedes_record_id` | string | Conditional | Prior `record_id` superseded by this revision. |
+| `superseded_at` | ISO-8601 UTC | Conditional | Blank if active; set to the replacing/revising row's `published_at` once superseded (enables regex-free `as_of(D)` queries). |
 | `include_in_net_aggregate` | boolean | Yes | True for latest non-overlapping in-scope rows forming the headline `NI_cash` series. |
-| `notes` | string | Optional | Concise provenance, superseding tags (`[superseded_at:...]`, `[replaced_by_...]`), and context. |
+| `notes` | string | Optional | Concise provenance, superseding context, and methodological notes. |
 
 ## 7. Required `output/README.md`
 

@@ -59,7 +59,7 @@ Do **not** stack ad-hoc SQL updates that mutate flags in unpredictable order. Im
 3. **Monthly Buyback Superseding** (accepted monthly 10-Q/10-K Item 2/5 rows supersede their covering Tier 1 quarterly XBRL fallback row).
 4. **Transaction Lifecycle Linking & Prospectus Activation** (link `424B`/`8-K`/`SC TO-I` announcements to closing/settlement/`10-Q` confirmations under shared `event_key`; ensure a transaction row and a periodic row never both count for the same economic flow).
 5. **Cross-Category Twin / Duplicate Guard** (prevent the same economic flow from counting twice across Cash Flow vs. Equity Statement tags or across an excluded/replaced anchor row and its twin).
-6. **Point-in-Time Revision Chain Wiring** (populate `is_revision`, `supersedes_record_id`, and `[superseded_at:<published_at>]` deterministically).
+6. **Point-in-Time Revision Chain Wiring** (populate `is_revision`, `supersedes_record_id`, and first-class `superseded_at` deterministically).
 7. **Membership Gating** (set `sp500_member_on_event_date` and gate `include_in_net_aggregate` strictly to active membership intervals and `>= membership_verified_back_to` for headline charts/totals).
 8. **Blocking Validator + Regression Snapshot Diff** (compare company-year totals against the previous publish; flag any company-year swing > $500M in `work/logs/regression_diff.md` so accidental rule regressions are caught immediately!).
 
