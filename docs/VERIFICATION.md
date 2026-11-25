@@ -39,7 +39,7 @@ Fed Z.1 $B = FU103164105.Q / 1,000 == FA103164105.Q / 4,000
    - Also compute event-level sensitivity variants: (a) with RSU `tax_withholding_net_settlement`, (b) with `issuance_employee_equity` valued at vest-date fair value (`NI_sbc_fv`), (c) with `retirement_cash_merger`, and (d) excluding non-cash split-off exchanges.
 2. **Version 2 — Acadian Equation (1) Total Market-Cap / Share-Count Net Issuance (`NI_sc`)**:
    - Formula from Acadian Eq. (1): `Net_Issuance(t) = Market_Cap(t) - Market_Cap(t-1) * P(t) / P(t-1)` = `Δ(split-adjusted shares outstanding) * P(t)`.
-   - Compute both in **USD billions** AND as **% of total S&P 500 market cap** (trailing 12 months, matching Acadian Figure 1 & Table 1) across the **entire verified window** (store `N-PORT-P` quarter-end prices for ALL historical snapshots, not just the latest 5–6!).
+   - Compute both in **USD billions** AND as **% of total S&P 500 market cap** (trailing 12 months, matching Acadian Figure 1 & Table 1) across the **entire verified window** (ingest `N-PORT-P` AND pre-2020 `N-Q`/`N-CSR` quarter-end prices from `membership-researcher`'s year files so `NI_sc` and `NI_float` cover the full verified history, not only 2020Q4+!).
    - Use SEC balance-sheet (`CommonStockSharesOutstanding`), cover-page (`EntityCommonStockSharesOutstanding`), AND dimensional/per-class iXBRL share counts combined with `N-PORT-P` quarter-end prices — **explicitly solve per-class and rounded-share-count issuers so ALL Magnificent Seven members (including dual-class and large semiconductor issuers!) are included cleanly without omissions!**
    - Report the **Magnificent Seven** sub-cut explicitly alongside total S&P 500 to verify directly against Acadian Table 1.
    - **Acadian IPO Valuation Bridge**: From each mega-IPO's primary `424B4` cover page (SpaceX, Anthropic), extract **BOTH** (a) **Primary Cash Proceeds Raised** (`new primary shares × IPO price`) AND (b) **Acadian Eq. (1) Market-Cap Issuance** (`total post-IPO shares outstanding × IPO/first-day price`) so the quantitative bridge from S&P 500 cash basis → S&P 500 Eq. (1) → Acadian all-U.S. headline is 100% transparent!
@@ -57,12 +57,13 @@ Fed Z.1 $B = FU103164105.Q / 1,000 == FA103164105.Q / 4,000
 ## 3. Automated Validation, Identities & Multi-Stage Audits
 
 ### Blocking Structural & Semantic Checks (Every Publish)
-1. Schema, required fields, enums, ISO UTC timestamps, `source_accession_number`, `source_url`, `source_location`, `split_adjustment_note`.
-2. **Fiscal-Year Reconciliation (`Σ quarters == FY`)** per issuer and concept family (blocking on over-counting!).
-3. **Zero Double-Counting**: No overlapping included monthly/quarterly/annual/transaction rows, no dual-class CIK duplication, no twin-of-anchor rows, no preferred/NCI leakage.
-4. **Bi-Temporal Verification**: Blocking check that `pit.as_of(latest) == headline`, plus automated test checks at 3+ earlier `as_of_date` snapshots confirming lifecycle chains evolve cleanly as filings arrive.
-5. **Regression Snapshot Diff**: Compare company-year totals against the previous publish; log any delta > $500M so rule changes never silently regress earlier fixes.
-6. **Outlier Guard**: Flag any single event > $30B or `avg_price_usd` outside `[$1, $20,000]` (except verified ultra-high-price shares) for mandatory review.
+1. Schema, strict controlled enums (reject off-enum subagent values), lowercase `true`/`false` booleans, required columns, ISO UTC timestamps, `source_accession_number`, `source_url`, `source_location`, `split_adjustment_note`.
+2. **Fiscal-Year Reconciliation (`Σ quarters == FY`)** per issuer and concept family (blocking on over-counting!), plus **granular-sum check** (granular transaction/monthly rows + any residual must equal the covering XBRL quarter within tolerance, never > 110%).
+3. **Zero Double-Counting**: No overlapping included monthly/quarterly/annual/transaction rows for the same `(cik, category, share_class)`, no dual-class CIK duplication, **no cross-category equal-amount twins** (e.g., same flow in `issuance_acquisition` and `issuance_other_common`), no employee-plan twins, and no preferred/convertible-preferred/NCI leakage.
+4. **Transaction Membership Purity & Straddler Report**: Transaction-dated rows (`granularity = transaction`) get strict `0.0` or `1.0` `member_overlap_fraction` on `event_date` (never day-prorated; large acquisition issuances on an entry/formation date verified for pre-entry exclusion!), and emit a report of all remaining undated > $250M straddling periodic rows.
+5. **Bi-Temporal Verification**: Blocking check that `pit.as_of(latest) == headline`, plus automated test checks at 3+ earlier `as_of_date` snapshots confirming lifecycle chains evolve cleanly as filings arrive.
+6. **Regression Snapshot Diff**: Compare company-year totals against the previous publish; log any delta > $500M so rule changes never silently regress earlier fixes.
+7. **Outlier Guard**: Flag any single event > $30B or `avg_price_usd` outside `[$1, $20,000]` (except verified ultra-high-price shares) for mandatory review.
 
 ### Internal Share-Count Reconciliation (Phase 5)
 - Compute `ΔS_obs − (S_issued − S_repurchased)` across all company-quarters; investigate the top 20–25 dollar residuals with `filing-analyst`.

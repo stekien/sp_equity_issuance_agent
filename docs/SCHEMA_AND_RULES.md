@@ -43,9 +43,9 @@ Apply these exact `category` values consistently across every row:
 
 ## 4. True Point-in-Time (Bi-Temporal) Revision & Lifecycle Chains
 
-1. **Canonical `event_key`**:
+1. **Canonical `event_key` & Unique Sub-Transaction IDs**:
    `{cik}|{category}|{share_class}|{granularity}|{period_start}|{period_end}|{sub_id}`
-   *(For multi-filing corporate transactions—e.g., an offering priced in a `424B5`, expanded by greenshoe in an `8-K`, and confirmed in a `10-Q`; an ASR announced in an `8-K` and settled 3 months later; or a tender offer announced in `SC TO-I` and finalized in `SC TO-I/A`—link all lifecycle observations under a **shared `event_key`** so an `as_of_date` query never drops the event between announcement and quarterly confirmation!)*
+   *(For multi-filing corporate transactions—e.g., an offering priced in a `424B5`, expanded by greenshoe in an `8-K`, and confirmed in a `10-Q`; an ASR announced in an `8-K` and settled 3 months later; or a tender offer announced in `SC TO-I` and finalized in `SC TO-I/A`—link all lifecycle observations under a **shared `event_key`** so an `as_of_date` query never drops the event between announcement and quarterly confirmation! Conversely, when TWO distinct deals occur for the same issuer in the same quarter—such as a direct placement AND an ATM program—assign **distinct `sub_id`s** and `granularity = transaction` so one never overwrites or supersedes the other!)*
 2. **Never Overwrite Prior Observations**:
    - Every newly filed update, settlement, greenshoe, or restatement creates a **new row** with its own `record_id`, the new filing's `published_at` (`acceptanceDateTime` UTC), `is_revision = true`, and `supersedes_record_id = <prior record_id>`.
    - Populate the first-class **`superseded_at`** column on the prior row with the newer row's `published_at` (leaving `superseded_at` blank on active rows) and set `include_in_net_aggregate = false` on the superseded row while keeping the row intact in `events.csv`.
@@ -69,7 +69,7 @@ Check: A(max published_at) == { r : include_in_net_aggregate == 1 }
 
 ## 6. Exact CSV Column Specification (`output/events.csv`)
 
-UTF-8, RFC 4180 CSV, sorted deterministically by `event_date`, `cik`, `category`, `published_at`:
+UTF-8, RFC 4180 CSV, sorted deterministically by `event_date`, `cik`, `category`, `published_at`. **Serialize all boolean columns strictly as lowercase `true` or `false`** (never `True`/`False` or `1`/`0`). Reject off-enum values in the loader before publishing!
 
 | Column | Type / Format | Required | Description |
 |---|---|---|---|

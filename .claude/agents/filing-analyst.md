@@ -24,8 +24,9 @@ You are a specialist SEC filing analyst supporting a point-in-time S&P 500 net e
 
 ## Required Output Format
 
-Return concise structured JSON matching `docs/SCHEMA_AND_RULES.md`, including:
-- All standard schema columns (`cik`, `ticker`, `company_name`, `share_class`, `security_type`, `category`, `direction`, `granularity`, `event_date`, `period_start`, `period_end`, `shares`, `avg_price_usd`, `amount_usd`, `net_amount_usd`, `valuation_basis`, `split_adjusted`, `split_adjustment_note`, `published_at`, `source_type`, `source_accession_number`, `source_url`, `source_location`, `extraction_method`, `calculation_formula`, `notes`)
+Return concise structured JSON matching `docs/SCHEMA_AND_RULES.md` with **strictly valid controlled enum values** (`category`, `direction`, `granularity`, `event_status`, `valuation_basis` — NEVER invent custom enum strings like `fair_value_at_close`!), including:
+- All standard schema columns (`cik`, `ticker`, `company_name`, `share_class`, `security_type`, `category`, `direction`, `event_status`, `granularity`, `event_date`, `period_start`, `period_end`, `shares`, `avg_price_usd`, `amount_usd`, `net_amount_usd`, `valuation_basis`, `split_adjusted`, `split_adjustment_note`, `published_at`, `source_type`, `source_accession_number`, `source_url`, `source_location`, `extraction_method`, `calculation_formula`, `notes`)
+- Explicit **unique `sub_id`** per distinct sub-transaction when multiple deals occur in the same quarter (and `granularity = transaction`) so rows never collide on `event_key` or overwrite each other!
 - Explicit `replaces` list (exact Tier 1/2 `record_id`s or `(cik, category, period)` superseded so the post-processing DAG never double-counts!)
 - Explicit `lifecycle_chain` linking announcement (`424B`/`8-K`/`SC TO-I`) → settlement/confirmation (`8-K`/`10-Q`) under one `event_key` where applicable
 - A clear `reject_reason` if the filing turns out NOT to be a primary common-equity flow.
