@@ -33,7 +33,7 @@ Apply these exact `category` values consistently across every row:
 
 1. **Headline Event Cash-Flow Basis (`NI_cash`)**:
    - **Buybacks**: Cash paid (`cash_paid`) or `shares * avg_price_usd` (`shares_times_avg_price`).
-   - **Offerings (`underwritten`, `atm`)**: Gross offering proceeds (`gross_proceeds` or `shares_times_offer_price`; `net_proceeds` noted if gross undisclosed).
+   - **Offerings (`underwritten`, `atm`)**: Gross offering proceeds (`gross_proceeds`, with `shares * offer_price` recorded in `calculation_formula` when computed; `net_proceeds` if only net proceeds are disclosed).
    - **Acquisitions & Conversions**: Closing/conversion-date fair value (`fair_value_at_issuance`) from the primary filing.
    - **Employee Equity Plans (Headline)**: Actual cash proceeds (`cash_proceeds` from option exercises & ESPP).
 2. **Supplemental Event Fair-Value Basis (`NI_sbc_fv`)**:
@@ -46,8 +46,9 @@ Apply these exact `category` values consistently across every row:
 1. **Canonical `event_key` & Unique Sub-Transaction IDs**:
    `{cik}|{category}|{share_class}|{granularity}|{period_start}|{period_end}|{sub_id}`
    *(For multi-filing corporate transactions—e.g., an offering priced in a `424B5`, expanded by greenshoe in an `8-K`, and confirmed in a `10-Q`; an ASR announced in an `8-K` and settled 3 months later; or a tender offer announced in `SC TO-I` and finalized in `SC TO-I/A`—link all lifecycle observations under a **shared `event_key`** so an `as_of_date` query never drops the event between announcement and quarterly confirmation! Conversely, when TWO distinct deals occur for the same issuer in the same quarter—such as a direct placement AND an ATM program—assign **distinct `sub_id`s** and `granularity = transaction` so one never overwrites or supersedes the other!)*
-2. **Never Overwrite Prior Observations**:
+2. **Never Overwrite Prior Observations & Zero Look-Ahead Across Stages**:
    - Every newly filed update, settlement, greenshoe, or restatement creates a **new row** with its own `record_id`, the new filing's `published_at` (`acceptanceDateTime` UTC), `is_revision = true`, and `supersedes_record_id = <prior record_id>`.
+   - **STRICT ANTI-LOOK-AHEAD RULE**: Every lifecycle stage MUST carry **ONLY the figure disclosed in THAT specific filing on its own `published_at`** — NEVER stamp an earlier `424B` shelf or `8-K` announcement with a dollar amount that only became known in a later `10-Q`/`10-K`, and NEVER replace a `424B`/`8-K` `gross_proceeds` figure with a `10-Q` `net_proceeds` figure without updating `valuation_basis = net_proceeds` (prefer preserving gross proceeds when the `10-Q` only states net!).
    - Populate the first-class **`superseded_at`** column on the prior row with the newer row's `published_at` (leaving `superseded_at` blank on active rows) and set `include_in_net_aggregate = false` on the superseded row while keeping the row intact in `events.csv`.
 3. **Exact Point-in-Time `as_of(D)` Operator**:
    - Implement a reusable library (`work/src/<pkg>/pit.py`) computing `as_of(D)` for any timestamp `D` cleanly using the first-class `superseded_at` column (zero regex on `notes`!):
@@ -76,7 +77,7 @@ UTF-8, RFC 4180 CSV, sorted deterministically by `event_date`, `cik`, `category`
 | `record_id` | string | Yes | Unique deterministic ID for this observation row. |
 | `event_key` | string | Yes | Canonical key grouping all lifecycle updates/revisions of the same economic event. |
 | `cik` | string (10-digit) | Yes | Zero-padded SEC CIK of the issuer. |
-| `ticker` | string | Yes | Ticker as of `event_date` (use `dei:TradingSymbol` for departed issuers where available). |
+| `ticker` | string | Yes | Ticker as of `event_date` — **blocking non-empty check**: backfill departed/predecessor CIKs from `dei:TradingSymbol` / `submissions.tickers` (blank allowed ONLY for genuinely unlisted entities with note). |
 | `company_name` | string | Yes | Issuer legal/filing name. |
 | `share_class` | string | Yes | Share class (`Common`, `Class A`, `Class B`, `All Common Classes`). |
 | `security_type` | string | Yes | `common_stock`. |
