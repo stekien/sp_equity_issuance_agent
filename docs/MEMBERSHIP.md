@@ -8,7 +8,9 @@ Every company that was an S&P 500 member at any point during the covered window 
   - Build survivorship-free PIT membership for the **trailing 12 months** (current constituents + all additions, removals, mergers, and spin-offs in the past 12 months) using the 4–5 most recent quarterly ETF `N-PORT-P` filings plus S&P DJI announcements from the last 12 months.
   - Set `membership_verified_back_to` to `T − 12 months` (recording `entered_before_verified_window = true` for continuing constituents). This immediately unblocks Phase 2 (Tier 1 XBRL + Milestone 1 Publish) without stalling on 2021–2024 delisted CIKs.
 - **Background Historical Expansion (`membership-researcher` subagent, launched immediately at end of Phase 1)**:
-  - Works continuously backward **one year at a time (`2025 → 2024 → 2023 → 2022 → 2021`)**, writing atomic staged JSON files (`work/staging_membership/year_{YYYY}.json`) matching this exact schema contract so the integration gate never rejects on missing fields:
+  - Works continuously backward **one year at a time: first `2025 → 2024 → 2023 → 2022 → 2021` (Priority 2), then DO NOT stop at 2021 — continue backward (`2020 → 2019 → 2018 → ...`) until stopped at `historical_cutoff_min`**!
+  - Uses SEC `N-PORT-P` XML back to mid-2019, and for pre-2019 years uses the same ETFs' SEC **Form `N-Q` / `N-CSR`** holdings schedules combined with historical **S&P DJI press releases** (which extend back decades) and Wikipedia verification!
+  - Writes atomic staged JSON files (`work/staging_membership/year_{YYYY}.json`) matching this exact schema contract so the integration gate never rejects on missing fields:
 
 ```json
 {

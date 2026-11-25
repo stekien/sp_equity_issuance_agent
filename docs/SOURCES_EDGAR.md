@@ -3,7 +3,8 @@
 ## 1. EDGAR Endpoints & Access Discipline
 
 - **Host-Scoped Header**: Send `User-Agent: <$SEC_USER_AGENT>` **only** to `*.sec.gov` hosts.
-- **Cross-Process Rate Limit**: ≤ 8 requests/sec globally via `work/src/`'s `fcntl`-locked token bucket and disk cache. Never fetch any URL twice.
+- **Cross-Process Rate Limit & Gzip Disk Cache**: ≤ 8 requests/sec globally via `work/src/`'s `fcntl`-locked token bucket. **Gzip-compress cached filings on write** (stdlib `gzip`, shrinking HTML/XML/JSON by ~80–85% to prevent filling Linux VM disks on multi-year runs!). Fetch primary filing documents (and targeted `EX-99.1` press releases) only — never bulk-download graphic/binary exhibits. Check `shutil.disk_usage` before each historical HTML wave; if free space drops below **5 GB**, stop downloading raw HTML archives (continue Tier 1 XBRL `companyfacts` only) and document in `COVERAGE.md`. Never fetch any URL twice.
+- **Background I/O Prefetching**: Run bulk EDGAR filing downloads as a **background Python I/O worker** (sharing the `fcntl` rate limiter — zero LLM token burn!) so the main agent builds/tests parsers, runs audits, and integrates membership in parallel without sitting idle.
 - **Core URL Templates**:
   - Submissions index (and `filings.files[]` pagination for high-volume filers): `https://data.sec.gov/submissions/CIK{cik10}.json`
   - XBRL CompanyFacts (historical non-dimensional facts): `https://data.sec.gov/api/xbrl/companyfacts/CIK{cik10}.json`
@@ -26,8 +27,11 @@ Apply **both** structural defenses from Phase 2 onward:
    - **Preferred-stock filter**: Flag/drop any `NewIssues`, `Conversion`, or `Acquisitions` USD fact that matches (within ~5%) same-period preferred stock issuance proceeds (`ProceedsFromIssuanceOfPreferredStockAndPreferenceStock` / `StockIssuedDuringPeriodValuePreferredStock`) unless primary filing confirms common stock.
    - **NCI subtraction**: Compare `StockIssuedDuringPeriodValueAcquisitions` against `MinorityInterestIncreaseFromBusinessCombination` in the same period; subtract confirmed NCI component (or drop if ≥ 95% NCI) and verify large deals against the filing.
 
-### Ordered XBRL Tag Precedence & Concept-Twin Guard
-Never sum overlapping Cash Flow and Stockholders' Equity concepts for the same flow in the same period! Apply strict precedence + overlap-aware selection:
+### Ordered XBRL Tag Precedence, Fiscal-Year Concept Locking & Concept-Twin Guard
+Never sum overlapping Cash Flow and Stockholders' Equity concepts for the same flow in the same period! Apply strict precedence with **one single XBRL concept locked per `(cik, category, fiscal_year)`**:
+- Select the highest-precedence concept that has a complete FY anchor (or active YTD chain for an in-progress fiscal year) and stick to that concept across all quarters of that fiscal year.
+- **Derived `$0` is a valid zero, NOT a missing quarter**: When `|YTD_k| - |YTD_{k-1}| == 0` under the selected concept, treat that quarter as `$0` — NEVER fall back to a lower-precedence concept for that quarter (prevents mis-tagged YTD-on-3M fallback tags from double-counting!).
+- **Regression Guard**: Because a filer occasionally switches tags mid-year or omits a non-cash retirement from a cash-flow tag, compare all alternate concepts for each `(cik, category, fiscal_year)` and log a diagnostic warning whenever an alternate concept has a >10% and >$50M larger FY total (reviewed via `filing-analyst` / regression snapshot diff > $500M!).
 - **Buybacks (USD)**: `PaymentsForRepurchaseOfCommonStock` ≻ `StockRepurchasedAndRetiredDuringPeriodValue` ≻ `StockRepurchasedDuringPeriodValue` ≻ `TreasuryStockValueAcquiredCostMethod` (reject cumulative multi-year program totals tagged as period facts—verify against annual cash flow!).
 - **Buybacks (Shares)**: `StockRepurchasedAndRetiredDuringPeriodShares` ≻ `StockRepurchasedDuringPeriodShares` ≻ `TreasuryStockSharesAcquired`.
 - **New Issues / Offerings**: `ProceedsFromIssuanceOfCommonStock` vs. `StockIssuedDuringPeriodValueNewIssues` (never count both for the same period; check whether `NewIssues` duplicates `ProceedsFromStockOptionsExercised` by comparing exact/near-matching dollars or shares and verifying against the filing rather than using an arbitrary multiplier!).
@@ -68,8 +72,17 @@ Before running any full-universe Tier 2 batch:
 1. Build a **golden test set of ~30–50 diverse cached filings** spanning tricky layouts (multi-row headers, `<br>` inside headers, zero-width spaces, per-class buyback columns, ASR sub-rows, `"in thousands"`/`"in millions"` units, date typos, preliminary `"subject to completion"` prospectuses, forward-sale agreements, secondary-only offerings, depositary/preferred covers, split-off `SC TO-I` exchanges, and ATM footnotes).
 2. Store **raw parsed candidates in `raw_extractions`** separately from final inclusion/acceptance decisions so any rule improvement re-runs in seconds without re-parsing HTML!
 
-### Dedicated Extraction for Every Required Buyback & Issuance Category
-Do NOT allow large flows to sit lazily in `buyback_unspecified` or `issuance_other_common`! Target **all** categories systematically (prioritizing trailing 12 months first, ordered by materiality, then backfilling to 2021):
+### Dedicated Two-Wave Extraction Order (Fast T12M First → Open-Ended Historical Expansion)
+Do NOT allow large flows to sit lazily in `buyback_unspecified` or `issuance_other_common`, and do NOT start heavy multi-year HTML downloads until the trailing 12 months are fully upgraded!
+- **Wave 1 (Phase 3 — Fast Trailing-12-Month Full-Category Pass)**:
+  1. Validate parsers on the ~30–50 filing golden corpus first.
+  2. Immediately scan **T12M `424B*` (filtered equity), `SC TO-I` / `SC TO-I/A`, and targeted `8-K` (ASRs, offerings, M&A)** across ALL T12M members (~2–3 min; builds live PIT announcement → settlement → `10-Q` lifecycle chains inside the headline window!).
+  3. Run **T12M `10-Q`/`10-K` Item 2/5 monthly buybacks + ATM/ASR equity footnote extractor**, prioritized by largest buyback/issuance materiality first (top 100 constituents cover ~75–80% of dollars quickly; refresh `output/` every ~75–100 companies).
+- **Wave 2 (Phase 4 — Open-Ended Historical Backfill: 2025 → 2021 → Earlier)**:
+  1. Complete **2025 → 2021** year-by-year first (matching the 2021–2026 benchmark window at full Tier 1 + Tier 2 depth), using a background Python prefetcher for gzip-cached HTML downloads.
+  2. **Do NOT stop at 2021**: if elapsed time is still `< historical_cutoff_min` (and free disk ≥ 5 GB), keep expanding backward year-by-year (`2020 → 2019 → 2018 → ...`, leveraging XBRL `companyfacts` back to ~2010–2011) and atomically refresh `output/` after every completed year!
+
+### Category-by-Category Extraction Rules
 
 1. **Open-Market Buybacks (`buyback_open_market`) — Monthly Tables (`10-Q` Part II Item 2 & `10-K` Part II Item 5)**:
    - Match headers whitespace-insensitively (`"average ... price"`, `"shares ... purchased"`). Handle multi-row headers, sub-rows under period headers, per-class columns (`Σ shares_k * price_k`), and skip summary `"Total"` / `"Nine months ended"` rows.

@@ -19,7 +19,7 @@ Keep all scripts, caches, databases, logs, and staging directories under `work/`
   - `watermarks` — Per-CIK `last_acceptance_datetime`, `last_accession_number`, `daily_index_last_date`, and `sp_release_last_date` for incremental operation.
   - `phase_timings` — Structured telemetry (`phase`, `step_or_batch`, `start_utc`, `end_utc`, `duration_sec`, `items_processed`, `notes`).
   - `qa_checks` — Automated validator results, publish-to-publish regression diffs, share-count reconciliation metrics, and audit findings.
-- `work/cache/` — Persistent disk cache for all HTTP responses (consider gzip compression for large HTML filings to keep disk usage modest). Never fetch the same URL twice.
+- `work/cache/` — Persistent **gzip-compressed** disk cache (`gzip` stdlib — cuts HTML/XML/JSON size ~80–85% so multi-year runs never fill a Linux VM disk!). Fetch primary filing documents only (never bulk-download binary/image exhibits). Check `shutil.disk_usage` before each historical HTML wave; if free disk drops below **5 GB**, stop downloading raw HTML archives (continue tiny Tier 1 XBRL `companyfacts` only) and log cleanly in `COVERAGE.md`. Never fetch the same URL twice.
 - `work/src/` — Modular Python package (EDGAR client, membership builder/integrator, XBRL/iXBRL extractor, golden-tested HTML/filing parsers, post-processing DAG, PIT query library, multi-methodology & benchmark analyzer, chart renderer, validator, atomic publisher, incremental CLI).
 - `work/staging_output/` — Staging directory validated before every atomic swap into `output/`.
 - `output/` — Final deliverables (`events.csv`, `README.md`, `net_equity_issuance.{svg,png}`, `acadian_comparison.{svg,png}`, `COVERAGE.md`).
