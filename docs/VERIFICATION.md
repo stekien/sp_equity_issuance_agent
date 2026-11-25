@@ -9,9 +9,9 @@ Respect this boundary strictly:
   - S&P Dow Jones Indices press releases (`press.spglobal.com`, `spglobal.com/spdji`)
   - Official Company Investor Relations press releases & wire releases (Business Wire, PR Newswire, GlobeNewswire)
 - **Authoritative Macro Benchmarks (For Benchmark Verification & Charts)**:
-  - Federal Reserve Board Z.1 Financial Accounts (`https://www.federalreserve.gov/releases/z1/` — download `z1_csv_files.zip` directly if FRED times out; Table F.5.1.1 / S11.1, series `FU103164105.Q` NSA quarterly and `FA103164105.Q` SAAR)
+  - Federal Reserve Board Z.1 Financial Accounts (`https://www.federalreserve.gov/releases/z1/` — download `z1_csv_files.zip` directly via the main Python HTTP client; Table F.5.1.1 / S11.1, series `FU103164105.Q` NSA quarterly transactions and `FA103164105.Q` SAAR transactions. **WARNING**: FRED `NCBEILQ027S` is the *level* series `FL103164105.Q` (~$80T market value), NOT the net issuance transactions flow — NEVER use `NCBEILQ027S` as a flow!)
   - Federal Reserve Board Table 1.46 (New Security Issues of U.S. Corporations — gross stock and corporate bond issues, used by Baker & Wurgler and Acadian Figure 3)
-  - FRED (`https://fred.stlouisfed.org/graph/fredgraph.csv?id=NCBEILQ027S` as secondary mirror of `FA103164105.Q`)
+  - FRED transactions mirror (secondary fallback only if `z1_csv_files.zip` is unreachable: verify series metadata explicitly states *"Transactions"* / *"Flow"*, e.g. `NCBCEBQ027S`, never *"Level"*)
   - Acadian Asset Management (`https://www.acadian-asset.com/investment-insights/owenomics/the-smart-money-is-selling-equity` and linked Owenomics methodology notes)
   - S&P Dow Jones Indices Quarterly Buybacks press releases (official published S&P 500 quarterly aggregate buyback totals — an exceptionally strong aggregate sanity check!)
 - **External Verification Websites (Strictly CHECK-ONLY — NEVER use as the source of any output number!)**:
@@ -43,13 +43,13 @@ Fed Z.1 $B = FU103164105.Q / 1,000 == FA103164105.Q / 4,000
    - Use SEC balance-sheet (`CommonStockSharesOutstanding`), cover-page (`EntityCommonStockSharesOutstanding`), AND dimensional/per-class iXBRL share counts combined with `N-PORT-P` quarter-end prices — **explicitly solve per-class and rounded-share-count issuers so ALL Magnificent Seven members (including dual-class and large semiconductor issuers!) are included cleanly without omissions!**
    - Report the **Magnificent Seven** sub-cut explicitly alongside total S&P 500 to verify directly against Acadian Table 1.
 3. **Version 3 — Acadian Figure 2 Float-Adjusted Net Issuance Analog (`NI_float`)**:
-   - Apply Equation (1) using **float-adjusted shares** (derivable from S&P 500 index-tracking ETF `N-PORT-P` share balances scaled by the ETF's unit/divisor ratio, or filing-disclosed float adjustments) to verify whether free-float adjustments alter the 2026 turn.
+   - Apply Equation (1) using **float-adjusted shares** inferred from S&P 500 index-tracking ETF `N-PORT-P` holdings. **CRITICAL NORMALIZATION**: Always strip out ETF investor creations/redemptions first by dividing each holding's share balance by the ETF's own total shares outstanding (`u_i(t) = balance_i(t) / ETF_shares(t)`, cross-checked against median `balance_j(t)/balance_j(t-1)` across non-issuing constituents) so you measure true S&P 500 float-adjusted share changes (`IWF * shares`) with zero fund-flow distortion!
 4. **Version 4 — Acadian Figure 3 Baker & Wurgler (2000) Equity Share (`E / (E + D)`)**:
    - Compute trailing-12-month `E / (E + D)` for S&P 500 constituents from primary SEC XBRL gross equity issuance (`E`, dollars raised) and gross corporate debt issuance (`D`, from `ProceedsFromIssuanceOfLongTermDebt` / `ProceedsFromIssuanceOfDebt`).
    - Compare against **Federal Reserve Board Table 1.46** macro `E / (E + D)` and 12-month changes in `E` and `D` (showing the debt-then-equity cycle highlighted by Acadian Figure 3).
 5. **Version 5 — Federal Reserve Z.1 Benchmark (`FU103164105.Q`)**:
-   - Pull `FU103164105.Q` (NSA quarterly `$M`, divide by `1,000` for `$B`) and verify `FA103164105.Q / 4 == FU103164105.Q` directly from Federal Reserve Board `z1_csv_files.zip` (Table F.5.1.1 / S11.1; fallback to FRED `NCBEILQ027S / 4,000`).
-   - Compare quarterly 2021–2026 against **S&P 500 Nonfinancials** (`is_financial = false`) and **Total S&P 500**, reporting sign agreement, correlation, and cumulative ratio.
+   - Pull `FU103164105.Q` (NSA quarterly transactions `$M`, divide by `1,000` for `$B`) and verify `FA103164105.Q / 4 == FU103164105.Q` directly from Federal Reserve Board `z1_csv_files.zip` (Table F.5.1.1 / S11.1 — downloaded by the main agent's Python HTTP client if a background subagent hits a network permission block).
+   - Compare quarterly across the **entire survivorship-free verified window** (not capped at 2021!) against **S&P 500 Nonfinancials** (`is_financial = false`) and **Total S&P 500**, reporting sign agreement, correlation, and cumulative ratio.
 6. **S&P DJI Quarterly Buybacks Cross-Check**:
    - Compare our S&P 500 quarterly gross buybacks against official S&P Dow Jones Indices quarterly S&P 500 buyback press releases (via `market-verifier`) — one of the sharpest direct sanity checks available!
 
@@ -73,21 +73,22 @@ Fed Z.1 $B = FU103164105.Q / 1,000 == FA103164105.Q / 4,000
 
 ## 4. Editorial Chart Specifications & Mega-IPO Callouts
 
-Adopt a clean, understated editorial aesthetic modeled on modern financial publications (warm off-white canvas `#fcfcfb`, dark charcoal title `#0b0b0b`, muted subtitle `#52514e`, subtle horizontal gridlines `#e1e0d9`, crisp zero baseline `#c3c2b7`, clean sans-serif typography, **programmatic label-collision checks** so zero text overlaps, rendered as both `.svg` and 300-DPI `.png`):
+Adopt a clean, understated editorial aesthetic modeled on modern financial publications (warm off-white canvas `#fcfcfb`, dark charcoal title `#0b0b0b`, muted subtitle `#52514e`, subtle horizontal gridlines `#e1e0d9`, crisp zero baseline `#c3c2b7`, clean sans-serif typography, **programmatic label-collision checks**, rendered as both `.svg` and 300-DPI `.png`). **Mandatory Visual Inspection Gate**: Before final publish, visually inspect BOTH rendered PNG files using your image-reading tool to confirm zero overlapping labels, zero leader lines colliding with data series, clean whitespace placement for IPO callouts, and 100% numeric consistency with `events.csv` and `COVERAGE.md`.
 
 ### Chart 1: `output/net_equity_issuance.svg` & `.png`
-- **Top Panel (Main S&P 500 Quarterly Series, 2021–2026)**:
+- **Top Panel (Main S&P 500 Quarterly Series — Full Verified History)**:
+  - Plot the **entire survivorship-free verified window** (back to `membership_verified_back_to` — do NOT cap at 2021 if earlier years are verified!). Never plot unverified/survivorship-biased years as solid bars in final Phase 6 charts. Clearly shade or footnote any **in-progress / late-filer latest quarter** so partial reporting isn't misread as a sudden drop.
   - Clean rounded-tip quarterly bars (blue `#2a78d6` / coral-red distinction or stacked Gross Issuance & Buybacks with bold Net Issuance series, `$bn per quarter`, prominent `y = 0` line, clear direct data labels on key peaks/troughs and latest quarter).
-  - **Direct Mega-IPO Timeline Annotations**: Place subtle vertical dashed markers and crisp callout labels directly on the timeline for major U.S. market IPO events discovered from primary filings/benchmarks — **at minimum SpaceX IPO (Jun 2026) and Anthropic IPO (Nov 2026)**, plus any other top-tier mega-IPO in the window — clearly stating date, scale (e.g., initial market cap & proceeds raised verified from SEC S-1/424B4), and whether it is inside or outside the S&P 500!
+  - **Direct Mega-IPO Timeline Annotations**: Place subtle vertical dashed markers and crisp callout labels directly on the timeline for major U.S. market IPO events discovered from primary filings/benchmarks — **at minimum SpaceX IPO (Jun 2026) and Anthropic IPO (Nov 2026)**, plus any other top-tier mega-IPO in the window — clearly stating date, scale (e.g., initial market cap & proceeds raised verified directly from primary SEC `424B4` cover pages), and whether it is inside or outside the S&P 500!
 - **Bottom Panel (Federal Reserve Z.1 Benchmark)**:
-  - S&P 500 Nonfinancial Net Issuance vs. **Federal Reserve Z.1 (`FU103164105.Q`, Table F.5.1.1, not seasonally adjusted, `$bn` per quarter)** with the same SpaceX / Anthropic timeline markers explaining the 2026 divergence.
+  - S&P 500 Nonfinancial Net Issuance vs. **Federal Reserve Z.1 (`FU103164105.Q`, Table F.5.1.1, not seasonally adjusted, `$bn` per quarter)** across the exact same verified window, with SpaceX / Anthropic timeline markers explaining the 2026 divergence.
 - Crisp bottom source footnote citing exact primary SEC filings, S&P DJI releases, Fed Z.1 `FU103164105.Q`, and point-in-time run date.
 
 ### Chart 2: `output/acadian_comparison.svg` & `.png`
 - **Top Panel (Multi-Methodology Rolling 12-Month Net Issuance)**:
-  - Compares all methodologies side-by-side over 2021–2026: (1) S&P 500 Cash-Flow Headline (`NI_cash`), (2) S&P 500 SBC-Fair-Value Event Basis (`NI_sbc_fv`), (3) S&P 500 Acadian Eq. (1) Share-Count × Price (`NI_sc`), (4) S&P 500 Float-Adjusted Analog (`NI_float`), and (5) Acadian All-U.S. ex-SpaceX & incl. SpaceX markers — with **explicit SpaceX IPO and Anthropic IPO callouts** (noting SpaceX's off-scale total market cap vs. proceeds raised and Anthropic's post-Acadian-cutoff timing!).
+  - Compares all methodologies side-by-side across the full verified window: (1) S&P 500 Cash-Flow Headline (`NI_cash`), (2) S&P 500 SBC-Fair-Value Event Basis (`NI_sbc_fv`), (3) S&P 500 Acadian Eq. (1) Share-Count × Price (`NI_sc`), (4) S&P 500 Float-Adjusted Analog (`NI_float`), and (5) Acadian All-U.S. ex-SpaceX & incl. SpaceX markers — with **explicit SpaceX IPO and Anthropic IPO callouts** (noting SpaceX's off-scale total market cap vs. primary `424B4` proceeds raised and Anthropic's post-Acadian-cutoff timing!).
 - **Bottom Panel (Baker-Wurgler Equity Share `E / (E + D)`)**:
-  - S&P 500 primary-filing `E / (E + D)` vs. Federal Reserve Board Table 1.46 macro `E / (E + D)` over the covered window, with SpaceX and Anthropic IPO timeline markers.
+  - S&P 500 primary-filing `E / (E + D)` vs. Federal Reserve Board Table 1.46 macro `E / (E + D)` across the full verified window, with SpaceX and Anthropic IPO timeline markers.
 
 ## 5. Required Structure of `output/COVERAGE.md`
 
