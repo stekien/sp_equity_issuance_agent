@@ -28,8 +28,8 @@ Apply **both** structural defenses from Phase 2 onward:
    - **NCI subtraction**: Compare `StockIssuedDuringPeriodValueAcquisitions` against `MinorityInterestIncreaseFromBusinessCombination` in the same period; subtract confirmed NCI component (or drop if ≥ 95% NCI) and verify large deals against the filing.
 
 ### Ordered XBRL Tag Precedence, Fiscal-Year Concept Locking & Concept-Twin Guard
-Never sum overlapping Cash Flow and Stockholders' Equity concepts for the same flow in the same period! Apply strict precedence with **one single XBRL concept locked per `(cik, category, fiscal_year)`**:
-- Select the highest-precedence concept that has a complete FY anchor (or active YTD chain for an in-progress fiscal year) and stick to that concept across all quarters of that fiscal year.
+Never sum overlapping Cash Flow and Stockholders' Equity concepts for the same flow in the same period! Apply strict precedence with **one single XBRL concept locked per `(cik, category, fiscal_year)` — including OPEN (in-progress) fiscal years before a 10-K is filed**:
+- Select the highest-precedence concept that has a complete FY anchor (or active YTD chain for an in-progress fiscal year) and stick to that concept across **every** quarter of that fiscal year (never switch concepts mid-year on an open fiscal year!).
 - **Derived `$0` is a valid zero, NOT a missing quarter**: When `|YTD_k| - |YTD_{k-1}| == 0` under the selected concept, treat that quarter as `$0` — NEVER fall back to a lower-precedence concept for that quarter (prevents mis-tagged YTD-on-3M fallback tags from double-counting!).
 - **Regression Guard**: Because a filer occasionally switches tags mid-year or omits a non-cash retirement from a cash-flow tag, compare all alternate concepts for each `(cik, category, fiscal_year)` and log a diagnostic warning whenever an alternate concept has a >10% and >$50M larger FY total (reviewed via `filing-analyst` / regression snapshot diff > $500M!).
 - **Buybacks (USD)**: `PaymentsForRepurchaseOfCommonStock` ≻ `StockRepurchasedAndRetiredDuringPeriodValue` ≻ `StockRepurchasedDuringPeriodValue` ≻ `TreasuryStockValueAcquiredCostMethod` (reject cumulative multi-year program totals tagged as period facts—verify against annual cash flow!).
@@ -44,11 +44,13 @@ Never sum overlapping Cash Flow and Stockholders' Equity concepts for the same f
 - **Debt Issuance (for Acadian Figure 3 Baker-Wurgler Equity Share `E/(E+D)`)**: `ProceedsFromIssuanceOfLongTermDebt`, `ProceedsFromIssuanceOfDebt`, `ProceedsFromIssuanceOfSeniorLongTermDebt`.
 - **Shares Outstanding (for Share-Count Reconciliation & Acadian Eq. 1)**: Collect `CommonStockSharesOutstanding` (us-gaap), `EntityCommonStockSharesOutstanding` (dei cover page), AND **sum all common share classes** from `10-Q`/`10-K` cover pages or iXBRL `ClassOfStockDomain` for dual-class/multi-class issuers (and cover-page exact counts when balance-sheet counts are rounded to 0.1B) so NO major constituent (especially any Magnificent Seven member!) is dropped from share-count reconciliation or Acadian Eq. (1)!
 
-### Context Validation, YTD De-cumulation & Blocking FY Reconciliation
-1. **Strict Context Validation**:
+### Context Validation, FY-Anchored YTD De-cumulation & Blocking FY Reconciliation
+1. **Strict Context Validation & FY-Start Anchoring**:
+   - **Anchor YTD chains strictly at the fiscal-year start**: NEVER treat standalone 3-month equity-rollforward contexts, stub periods, or mid-year rolling windows as independent YTD chains (this causes massive overlapping double-counts!).
    - Accept a direct ~3-month fact `[a, b]` ONLY when `b` and `a − 1` align (±3 days) with actual report dates of the issuer's `10-Q`/`10-K`/`10-QT` filings (or `a` equals fiscal-year start; explicitly support `10-QT` transition quarters and 12–17 week retail quarters!).
    - Reject 3-month contexts reported inside a `10-K` unless they correspond to the fiscal-year-end quarter (prevents mis-tagged full-year figures on Q3/Q4 contexts!).
    - Reject a 3-month fact whose value equals the same filing's YTD value when an earlier quarter of that fiscal year was non-zero.
+   - **Blocking Overlap Guard**: Enforce at Milestone 1 and every publish that **zero** included rows of the same `(cik, category, share_class)` overlap in `[period_start, period_end]`!
 2. **Vintage-Consistent YTD De-cumulation & Sign Normalization (Take Absolute Value BEFORE Subtracting!)**:
 
 ```text
@@ -62,6 +64,7 @@ published_at(Q_k) = max(published_at(YTD_k), published_at(YTD_{k-1}))
    - Every derived quarter (`Q2`, `Q3`, `Q4`) sets `extraction_method = calculated`, carries the `acceptanceDateTime` of the later filing needed to compute it, and records exact accession numbers and subtraction formula in `calculation_formula`.
 3. **Blocking Fiscal-Year Identity (`Σ quarters == FY`)**:
    - For every issuer, fiscal year, and concept family, verify that the sum of included quarterly/monthly rows does not exceed the 10-K FY total (within tolerance) — make FY over-counting a **blocking validator check** from Milestone 1!
+   - **Root-cause quarantined chains**: If any chains fail FY reconciliation and are quarantined (frequently due to 52/53-week fiscal-year start date shifts of 1–6 days!), fix the fiscal-year grouping tolerance rather than silently dropping real company-years from the headline!
 4. **Comparative Re-Presentation vs. Real Revisions**:
    - Never assume a comparative value of `0` in a later filing means the prior period was revised to zero (filers often re-label concepts across years!). Only record a revision when the comparative fact in the same concept/line genuinely changes or an amended filing (`10-Q/A`, `10-K/A`) restates it.
 
@@ -74,10 +77,10 @@ Before running any full-universe Tier 2 batch:
 
 ### Dedicated Two-Wave Extraction Order (Fast T12M First → Open-Ended Historical Expansion)
 Do NOT allow large flows to sit lazily in `buyback_unspecified` or `issuance_other_common`, and do NOT start heavy multi-year HTML downloads until the trailing 12 months are fully upgraded!
-- **Wave 1 (Phase 3 — Fast Trailing-12-Month Full-Category Pass)**:
-  1. Validate parsers on the ~30–50 filing golden corpus first.
-  2. Immediately scan **T12M `424B*` (filtered equity), `SC TO-I` / `SC TO-I/A`, and targeted `8-K` (ASRs, offerings, M&A)** across ALL T12M members (~2–3 min; builds live PIT announcement → settlement → `10-Q` lifecycle chains inside the headline window!).
-  3. Run **T12M `10-Q`/`10-K` Item 2/5 monthly buybacks + ATM/ASR equity footnote extractor**, prioritized by largest buyback/issuance materiality first (top 100 constituents cover ~75–80% of dollars quickly; refresh `output/` every ~75–100 companies).
+- **Wave 1 (Phase 3 — Fast Trailing-12-Month Full-Category Pass, Largest Movers First!)**:
+  1. Validate parsers on the ~30–50 filing golden corpus first (or ~15–20 diverse filings on budgets ≤ 90m).
+  2. Immediately target the **top 25–50 largest T12M movers first** (largest absolute T12M buybacks & issuances) across `424B*` (filtered equity), `SC TO-I` / `SC TO-I/A`, equity `8-K` (ASRs, offerings, M&A), and `10-Q`/`10-K` Item 2/5 monthly buybacks + ATM/ASR footnotes — publishing immediately after this first high-value batch so all required categories and live `announced_or_priced → completed` PIT lifecycle chains exist early!
+  3. Expand across the remaining T12M constituents ordered by materiality (top 100 constituents cover ~75–80% of S&P 500 dollars quickly; refresh `output/` every ~50–100 companies).
 - **Wave 2 (Phase 4 — Open-Ended Historical Backfill: 2025 → 2021 → Earlier)**:
   1. Complete **2025 → 2021** year-by-year first (matching the 2021–2026 benchmark window at full Tier 1 + Tier 2 depth), using a background Python prefetcher for gzip-cached HTML downloads.
   2. **Do NOT stop at 2021**: if elapsed time is still `< historical_cutoff_min` (and free disk ≥ 5 GB), keep expanding backward year-by-year (`2020 → 2019 → 2018 → ...`, leveraging XBRL `companyfacts` back to ~2010–2011) and atomically refresh `output/` after every completed year!

@@ -28,15 +28,16 @@ Keep all scripts, caches, databases, logs, and staging directories under `work/`
 
 1. Verify `$SEC_USER_AGENT` is set and non-empty. If missing, fail fast and report clearly.
 2. Read `RUN_BUDGET_MINUTES` (default `240`) and compute scaled time gates in `work/run_meta.json`:
-   - `phase6_cutoff_min = max(budget - 30, round(budget * 0.78))` → `210` min for 240m; `23` min for 30m.
-   - `freeze_cutoff_min = max(budget - 15, round(budget * 0.93))` → `225` min for 240m; `28` min for 30m.
-   - `historical_cutoff_min = min(round(budget * 0.79), phase6_cutoff_min - 2)` → `190` min for 240m; `21` min for 30m.
+   - `phase6_cutoff_min = max(budget - 30, round(budget * 0.78))` → `210`m for 240m; `55`m for 70m; `23`m for 30m.
+   - `freeze_cutoff_min = max(budget - 15, round(budget * 0.93))` → `225`m for 240m; `65`m for 70m; `28`m for 30m.
+   - `historical_cutoff_min = min(round(budget * 0.79), phase6_cutoff_min - 2)` → `190`m for 240m; `53`m for 70m; `21`m for 30m.
 3. Create `work/.venv` with Python 3.14 (`python3 -m venv work/.venv`). Install packages using binary wheels first (`uv pip install` or `pip install --prefer-binary requests httpx beautifulsoup4 lxml pandas numpy matplotlib`). If any C-extension package (`lxml`) lacks a Python 3.14 wheel and fails to build, immediately skip it and use Python's stdlib (`xml.etree.ElementTree`, `html.parser`) rather than burning minutes on compiler errors.
-4. Build the centralized HTTP client in `work/src/` with:
+4. Build the centralized HTTP client in `work/src/<pkg>/edgar_http.py` (**never name a module after a Python stdlib package such as `http.py`, `json.py`, or `csv.py`!**) with:
    - **Host-scoped User-Agent**: Send `$SEC_USER_AGENT` **only** to `*.sec.gov` hosts; send a clean neutral descriptive User-Agent (no personal email, never spoofing a browser) to non-SEC hosts.
    - **Cross-process global rate limiter**: Enforce **≤ 8 requests/second** across ALL processes and subagents targeting `sec.gov` using an `fcntl`-locked timestamp token bucket file under `work/cache/.edgar_ratelimit.lock`.
    - **Explicit timeouts & backoff**: 10s connect / 25s read timeout on every request; exponential backoff with jitter on HTTP `429`/`5xx` (max 3–5 retries); fail-fast circuit breaker on persistent `403`/`404`.
-   - Always invoke Python scripts with direct single-command paths (`work/.venv/bin/python -u work/src/...`, never compound `cd ... && ...` or `sleep`) so background subagents never hit permission denials; log progress every ~25 CIKs and record a `phase_timings` row in the **main** SQLite DB for every phase (0–6). Avoid shell-specific word splitting (`for x in $var`) in batch commands.
+   - **Mandatory Clock Print & Module Invocation**: Invoke Python modules cleanly as `work/.venv/bin/python -u -m <pkg>.<mod>` (never compound `cd ... && ...` or `sleep`). Every CLI module MUST print `elapsed=X.X / <budget> min (phase6=<P>, freeze=<F>)` from `work/run_meta.json` at exit so routing decisions always read the real clock! Log progress every ~25 CIKs and record a `phase_timings` row in the **main** SQLite DB for every phase (0–6). Avoid shell-specific word splitting (`for x in $var`) in batch commands.
+5. Download official **Federal Reserve Board Z.1 (`z1_csv_files.zip`)** directly from the main agent's Python client during Phase 0/1 (takes ~1–2 seconds) so macro benchmarks never depend on a background agent shell fetch.
 
 ## 3. Staged Background Handoff & Fast Integration Checks
 
@@ -61,7 +62,7 @@ Do **not** stack ad-hoc SQL updates that mutate flags in unpredictable order. Im
 5. **Cross-Category Twin / Duplicate Guard** (prevent the same economic flow from counting twice across Cash Flow vs. Equity Statement tags or across an excluded/replaced anchor row and its twin).
 6. **Point-in-Time Revision Chain Wiring** (populate `is_revision`, `supersedes_record_id`, and first-class `superseded_at` deterministically).
 7. **Membership Gating** (set `sp500_member_on_event_date` and gate `include_in_net_aggregate` strictly to active membership intervals and `>= membership_verified_back_to` for headline charts/totals).
-8. **Blocking Validator + Regression Snapshot Diff** (compare company-year totals against the previous publish; flag any company-year swing > $500M in `work/logs/regression_diff.md` so accidental rule regressions are caught immediately!).
+8. **Blocking Validator + Regression Snapshot Diff** (enforce schema, enums, FY reconciliation, **zero overlapping included rows for the same `(cik, category, share_class)`**, and `as_of(latest) == headline` from Milestone 1 onward; compare company-year totals against the previous publish and flag any swing > $500M in `work/logs/regression_diff.md` so accidental rule regressions are caught immediately!).
 
 ## 5. Atomic Publishing Protocol
 
