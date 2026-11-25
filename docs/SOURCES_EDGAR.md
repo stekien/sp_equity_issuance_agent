@@ -15,7 +15,7 @@
 ## 2. Tier 1: Full-Universe XBRL & Dimensional Equity-Statement Extraction (Phase 2)
 
 ### Exact Publication Timestamps
-`companyfacts` carries only `filed` (date). Always join each fact's `accn` against `submissions` (`accessionNumber` → `acceptanceDateTime`, verified true UTC) so `published_at` has second-level UTC precision (`YYYY-MM-DDTHH:MM:SSZ`).
+`companyfacts` carries only `filed` (date). Always join each fact's `accn` against `submissions` (`accessionNumber` → `acceptanceDateTime`, verified true UTC) — **including fetching paginated `submissions.filings.files[]` archives once per issuer** — so even 2010–2020 historical rows have second-level UTC `published_at` precision (`YYYY-MM-DDTHH:MM:SSZ`) rather than falling back to date-only!
 
 ### CRITICAL LESSON: Never Blindly Trust Non-Dimensional Total-Equity XBRL Facts!
 In `companyfacts`, non-dimensional `StockIssuedDuringPeriodValue*` facts frequently represent the **Total Equity** column of the Statement of Stockholders' Equity—silently sweeping in **preferred stock issuances**, **mandatory convertible preferreds**, **noncontrolling interests (NCI)**, and **subsidiary equity transactions**!
