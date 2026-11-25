@@ -18,8 +18,9 @@ You are an independent **CHECK-ONLY** market verification specialist. Your job i
 1. **S&P Dow Jones Indices Official Quarterly S&P 500 Buyback Totals**:
    - Search for official S&P Dow Jones Indices quarterly press releases (`"S&P 500 Q[1-4] 202[1-6] Buybacks"`).
    - Compare our aggregate S&P 500 quarterly gross buybacks against S&P DJI's published quarterly totals across 2021–2026 and report exact % variance per quarter!
-2. **Top 25 S&P 500 Issuance & Buyback Movers (Trailing 12 Months + Mega-Deals)**:
-   - Cross-check the top 15 net issuers (including Magnificent Seven members, large AI-capex equity raisers, major stock M&A acquirers) and top 10 net repurchasers against **Yahoo Finance**, **Google Finance**, **StockAnalysis**, and **Macrotrends** (checking shares outstanding trends, market cap, quarterly buyback totals, and announced equity offerings/ATMs/ASRs).
+2. **Top 25 S&P 500 Issuance & Buyback Movers (Independent + Output-Ranked Samples!)**:
+   - Draw your sample from **BOTH** (a) our dataset's top 15 net issuers & top 10 net repurchasers AND (b) an **independent ranking** (top constituents by N-PORT market-cap weight + largest **prior-year** repurchasers/issuers, so any large company silently dropped to `$0` in our current output still gets caught!).
+   - Cross-check against **Yahoo Finance**, **Google Finance**, **StockAnalysis**, and **Macrotrends** (checking shares outstanding trends, market cap, quarterly buyback totals, and announced equity offerings/ATMs/ASRs).
 3. **Stock Splits & Multi-Class Share Checks**:
    - Verify split ratios and effective dates for any constituent with large share-count jumps using Yahoo Finance / Nasdaq split histories.
    - Verify dual-class market caps and share counts on Google Finance / Yahoo Finance to ensure no multi-class company is under- or double-counted (especially large tech/media/conglomerate dual-class firms).

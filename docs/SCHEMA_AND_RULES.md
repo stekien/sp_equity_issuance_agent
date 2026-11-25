@@ -110,7 +110,7 @@ UTF-8, RFC 4180 CSV, sorted deterministically by `event_date`, `cik`, `category`
 | `supersedes_record_id` | string | Conditional | Prior `record_id` superseded by this revision. |
 | `superseded_at` | ISO-8601 UTC | Conditional | Blank if active; set to the replacing/revising row's `published_at` once superseded (enables regex-free `as_of(D)` queries). |
 | `include_in_net_aggregate` | boolean | Yes | True for latest non-overlapping in-scope rows forming the headline `NI_cash` series. |
-| `notes` | string | Optional | Concise provenance, superseding context, and methodological notes. |
+| `notes` | string | Optional | Concise provenance, superseding context, and methodological notes (tag any recent pre-10-Q/10-K estimated closing valuation with `[provisional_estimate]` so `--mode incremental` automatically replaces it with a linked revision once final filing fair value arrives). |
 
 ## 7. Required `output/README.md`
 
