@@ -11,8 +11,9 @@ You are an independent, adversarial quality-assurance auditor. Your job is to **
 Read `docs/SCHEMA_AND_RULES.md`, `docs/SOURCES_EDGAR.md`, and `docs/VERIFICATION.md`, then inspect `work/staging_output/` (or `output/`), `work/db/pit_equity.sqlite`, `work/staging_benchmarks/`, and `work/logs/regression_diff.md`:
 
 1. **Structural & Economic Identities (All Must Pass)**:
-   - Schema, controlled category enums, required columns, non-empty `source_accession_number`/`source_url`/`source_location`/`split_adjustment_note`.
-   - **Fiscal-Year Reconciliation (`Σ quarters == FY`)**: Confirm ZERO over-counting fiscal years remain across concept families.
+   - Schema, controlled category enums, required columns (including `superseded_at`, `member_overlap_fraction`, `event_status`), non-empty `source_accession_number`/`source_url`/`source_location`/`split_adjustment_note`.
+   - **Fiscal-Year Reconciliation (`Σ quarters == FY`)**: Confirm ZERO over-counting fiscal years remain across concept families, and verify one concept locked per `(cik, category, fiscal_year)`.
+   - **Membership & Straddling Audit**: Confirm `membership_announced_at <= effective_date` on announced changes, `member_overlap_fraction` properly applied on straddling quarters, and large straddling deals (> $250M) dated cleanly at transaction/monthly granularity.
    - **Zero Semantic Double-Counting**: Actively hunt for:
      - Non-dimensional XBRL totals silently including **preferred stock**, **depositary shares**, or **noncontrolling interests (NCI) / subsidiaries**.
      - Cash-flow vs. equity-statement concept twins (e.g., `ProceedsFromIssuanceOfCommonStock` + `StockIssuedDuringPeriodValueNewIssues`, or `NewIssues` duplicating `ProceedsFromStockOptionsExercised`).
@@ -31,10 +32,10 @@ Read `docs/SCHEMA_AND_RULES.md`, `docs/SOURCES_EDGAR.md`, and `docs/VERIFICATION
      - At least 2 S&P 500 additions/removals (confirming boundary date & primary source)
      - At least 2 multi-filing revision/lifecycle chains (`is_revision = true`).
 4. **All Benchmarks, Web Verification & Chart Integrity**:
-   - Verify Fed Z.1 (`FU103164105.Q` NSA `$B = FU/1,000 = FA/4,000`) math is exact.
-   - Verify ALL Acadian versions (Cash-flow, SBC-FV, Eq. 1 share-count × price incl. complete Magnificent Seven without omitting key members, Float-adjusted, Baker-Wurgler `E/(E+D)` vs. FRB Table 1.46) are computed without formula or unit errors.
+   - Verify Fed Z.1 (`FU103164105.Q` NSA `$B = FU/1,000 = FA/4,000`) math is exact (and confirm FRED `NCBEILQ027S` Level series was NOT misused as a flow!).
+   - Verify ALL Acadian versions (Cash-flow, SBC-FV, Eq. 1 share-count × price incl. complete Magnificent Seven without omitting key members, Float-adjusted with ETF-flow normalization verified, Baker-Wurgler `E/(E+D)` vs. FRB Table 1.46) are computed without formula or unit errors.
    - Verify every high-priority discrepancy raised by `market-verifier` (Yahoo Finance, Google Finance, S&P DJI Buybacks) and `benchmark-researcher` (Wikipedia, Acadian) was either fixed from primary SEC filings or documented honestly in `COVERAGE.md`.
-   - Inspect BOTH rendered charts (`net_equity_issuance.png` and `acadian_comparison.png`): confirm numbers match `events.csv` and `COVERAGE.md`, zero overlapping labels, clean editorial visual style, and **SpaceX & Anthropic IPOs are clearly and accurately annotated** (with verified S&P 500 membership status!).
+   - Visually inspect BOTH rendered PNG charts (`net_equity_issuance.png` and `acadian_comparison.png`): confirm numbers match `events.csv` and `COVERAGE.md`, zero overlapping labels or leader lines crossing curves, clean editorial visual style, and **SpaceX & Anthropic IPOs are clearly annotated from primary `424B4` cover pages** (with verified S&P 500 membership status!).
    - Confirm the Phase 6 7-day watermark-rollback `--mode incremental` test passed.
 
 ## Required Report Format

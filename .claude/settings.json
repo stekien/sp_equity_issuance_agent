@@ -11,6 +11,7 @@
       "Bash(python *)",
       "Bash(python3 *)",
       "Bash(python3.14 *)",
+      "Bash(PYTHONPATH=*)",
       "Bash(work/.venv/bin/*)",
       "Bash(uv *)",
       "Bash(pip *)",
