@@ -29,7 +29,7 @@ Respect this boundary strictly:
 Read the Acadian article (`the-smart-money-is-selling-equity`) in full via `benchmark-researcher` and compute **every single methodology version** described in the article for the S&P 500 so all definitions can be compared like-for-like:
 
 ```text
-NI_cash(q) = sum_{r active} net_amount_usd(r) * overlap_days(r, q) / total_days(r)
+NI_cash(q) = sum_{r active} net_amount_usd(r) * overlap_days(r ∩ membership_interval, q) / total_days(r)
 NI_sc(q)   = sum_{c, t in q} (Shares_c(t) - Shares_c(t-1)) * Price_c(t)   # splits excluded; sum ALL common classes!
 Fed Z.1 $B = FU103164105.Q / 1,000 == FA103164105.Q / 4,000
 ```
